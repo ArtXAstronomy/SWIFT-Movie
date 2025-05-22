@@ -202,6 +202,7 @@ int main(int argc, char *argv[]) {
   int with_line_of_sight = 0;
   int with_rt = 0;
   int with_power = 0;
+  int with_imaging = 0;
   int verbose = 0;
   int nr_threads = 1;
   int nr_pool_threads = -1;
@@ -364,6 +365,8 @@ int main(int argc, char *argv[]) {
                 "Fraction of the total step's time spent in a task to trigger "
                 "a dump of the task plot on this step",
                 NULL, 0, 0),
+      OPT_BOOLEAN(0, "imaging", &with_imaging, "Run with imaging outputs.",
+                  NULL, 0, 0),
       OPT_END(),
   };
   struct argparse argparse;
@@ -1577,6 +1580,11 @@ int main(int argc, char *argv[]) {
       star_formation_first_init_stats(&starform, &e);
     }
 
+    /* Init the imaging if we are doing it */
+    if (with_imaging) {
+      imaging_init(params, &e);
+    }
+
     /* Get some info to the user. */
     if (myrank == 0) {
       const long long N_DM = N_total[swift_type_dark_matter] +
@@ -1814,6 +1822,11 @@ int main(int argc, char *argv[]) {
       threadpool_reset_log(&e.threadpool);
     }
 #endif
+
+    /* Dump the images if we are doing imaging */
+    if (with_imaging) {
+      imaging_write_images(&e);
+    }
   }
 
   /* Write final time information */
