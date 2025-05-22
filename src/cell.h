@@ -549,9 +549,6 @@ struct cell {
     /*! The image collection task at the top level */
     struct task *imaging_collect;
 
-    /*! Flag for whether an image has been generated at this level */
-    int image_generated;
-
   } image_data;
 
 } SWIFT_STRUCT_ALIGN;

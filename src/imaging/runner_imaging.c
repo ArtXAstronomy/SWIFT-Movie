@@ -31,51 +31,124 @@
 #include "runner.h"
 #include "timers.h"
 
+#include <math.h>
+
 /**
- * @brief Make a mass image for dark matter.
+ * @brief Make a smoothed mass image for dark matter.
  *
- * Dark matter is treated as point particles, so we just add the mass to the
- * pixel.
+ * Each dark-matter particle’s mass is distributed over nearby pixels
+ * using a 2D Gaussian of width ε (the softening length), truncated
+ * at 3 ε for efficiency.
  *
- * @param image_data The image data structure.
- * @param iimage The index of the image.
- * @param ci The cell data structure.
+ * @param image_data The overall image settings (pixel size, etc.).
+ * @param iimage     Index of which image buffer to write into.
+ * @param c          Cell containing the dark-matter particles.
  */
 static void runner_do_gpart_mass_image(struct image_data *image_data,
                                        int iimage, struct cell *c) {
-  /* Extract the gparts from the cell. */
+  /* Extract the particle list and count from the cell’s gravity data. */
   struct gpart *gparts = c->grav.parts;
   int gcount = c->grav.count;
 
-  /* Get the padded location we'll use as a zero point. */
-  double xloc = c->image_data.padded_loc[0];
-  double yloc = c->image_data.padded_loc[1];
+  /* Origin (lower-left) of this cell in “world” coordinates. */
+  double x0 = c->image_data.padded_loc[0];
+  double y0 = c->image_data.padded_loc[1];
 
-  /* Get the pixel size. */
-  double pixel_size[2] = {image_data->pixel_size[0], image_data->pixel_size[1]};
+  /* Pixel dimensions in world units. */
+  double dx = image_data->pixel_size[0];
+  double dy = image_data->pixel_size[1];
 
-  /* Compute the number of pixels along each axis. */
-  const int num_pixels[2] = {
-      ceil(c->image_data.padded_width[0] / pixel_size[0]),
-      ceil(c->image_data.padded_width[1] / pixel_size[1])};
+  /* Number of pixels along X and Y within this padded cell. */
+  int nx = (int)ceil(c->image_data.padded_width[0] / dx);
+  int ny = (int)ceil(c->image_data.padded_width[1] / dy);
 
-  /* Extract the cells image buffer. */
+  /* Pointer to the raw image buffer we’ll accumulate into. */
   double *image = c->image_data.images[iimage];
 
-  /* Loop over all gparts. */
+  /*
+   * Pre-declare a small buffer for weights. We assume
+   * 3ε/dx will never exceed 15 pixels or so; adjust size
+   * if you use a larger cutoff.
+   */
+  const int MAX_RAD_PX = 20;
+  double wbuf[2 * MAX_RAD_PX + 1][2 * MAX_RAD_PX + 1];
+
+  /* Loop over each dark-matter “particle.” */
   for (int i = 0; i < gcount; i++) {
     struct gpart *gp = &gparts[i];
+    double eps = gp->epsilon; /* softening length */
 
-    /* What pixel is this gpart in? */
-    int pid = (int)((gp->x[0] - xloc) / pixel_size[0]);
-    int pjd = (int)((gp->x[1] - yloc) / pixel_size[1]);
+    /*
+     * Convert particle position into floating‐point pixel coords:
+     *   fx = (world_x – x0) / dx
+     *   fy = (world_y – y0) / dy
+     */
+    double fx = (gp->x[0] - x0) / dx;
+    double fy = (gp->x[1] - y0) / dy;
 
-    /* If nsoft is 0/1 then we don't need to smooth. */
-    image[pjd + pid * num_pixels[1]] += gp->mass;
+    /*
+     * Compute cutoff radius in pixel units (3 × ε / dx).
+     * We’ll loop over all pixels within ±irad of the particle.
+     */
+    double eps_px = eps / dx;
+    double radius = 3.0 * eps_px;
+    int irad = (int)ceil(radius);
+
+    /*
+     * Sanity: clamp to our buffer size.
+     * If you ever need a bigger radius, enlarge MAX_RAD_PX.
+     */
+    if (irad > MAX_RAD_PX) {
+      irad = MAX_RAD_PX;
+    }
+
+    /*
+     * 1) Compute un-normalized Gaussian weights over the patch.
+     *    W(r) = (1 / (2π ε²)) exp[–½ (r/ε)²], with r² = dx²+dy².
+     *    Here we measure distances in pixel units.
+     */
+    double total_w = 0.0;
+    double ix0 = floor(fx);
+    double iy0 = floor(fy);
+    for (int di = -irad; di <= irad; di++) {
+      for (int dj = -irad; dj <= irad; dj++) {
+        /*
+         * Center each pixel at (ix0 + 0.5 + di, iy0 + 0.5 + dj):
+         * compute offset from true particle position.
+         */
+        double rx = fx - (ix0 + 0.5 + di);
+        double ry = fy - (iy0 + 0.5 + dj);
+        double r2 = rx * rx + ry * ry;
+
+        /* Gaussian in pixel units: σ = eps_px */
+        double w =
+            exp(-0.5 * r2 / (eps_px * eps_px)) / (2.0 * M_PI * eps_px * eps_px);
+
+        wbuf[di + irad][dj + irad] = w;
+        total_w += w;
+      }
+    }
+
+    /*
+     * 2) Normalize and distribute mass:
+     *    each pixel gets gp->mass * (w / total_w)
+     */
+    int base_ix = (int)ix0 - irad;
+    int base_iy = (int)iy0 - irad;
+    for (int di = 0; di <= 2 * irad; di++) {
+      int ix = base_ix + di;
+      if (ix < 0 || ix >= nx)
+        continue; /* skip out-of-bounds */
+      for (int dj = 0; dj <= 2 * irad; dj++) {
+        int iy = base_iy + dj;
+        if (iy < 0 || iy >= ny)
+          continue;
+
+        double w_norm = wbuf[di][dj] / total_w;
+        image[ix * ny + iy] += gp->mass * w_norm;
+      }
+    }
   }
-
-  /* Flag that we generated an image. */
-  c->image_data.image_generated = 1;
 }
 
 /**
@@ -225,9 +298,6 @@ static void runner_do_recursive_imaging_collect(struct runner *r,
       top_image[y + x * top_num_pixels[1]] += sub_image[k + j * num_pixels[1]];
     }
   }
-
-  /* Reset the image generated flag */
-  c->image_data.image_generated = 0;
 }
 
 void runner_do_imaging_collect(struct runner *r, struct cell *c, int timer) {

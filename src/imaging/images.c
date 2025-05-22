@@ -367,9 +367,9 @@ static void imaging_write_image(struct space *s,
            image->base_name, image->frame_number);
 
   /* Write the image as an RGB PNG. */
-  imaging_write_colormap_png_zscale(filename, image_buff, image_data->xres,
-                                    image_data->yres, plasma_colormap,
-                                    plasma_colormap_size, 1.5);
+  imaging_write_colormap_png_min_max(filename, image_buff, image_data->xres,
+                                     image_data->yres, plasma_colormap,
+                                     plasma_colormap_size);
 
   /* Free the image buffer. */
   free(image_buff);
