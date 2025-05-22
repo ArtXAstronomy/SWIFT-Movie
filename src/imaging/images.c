@@ -215,10 +215,11 @@ static void imaging_write_colormap_png_min_max(const char *filename,
  * @param gamma         Gamma to apply after stretch (e.g. 1.0 = linear,
  *                      1.8–2.2 to brighten midtones)
  */
-static void imaging_write_colormap_png(const char *filename, const double *data,
-                                       int width, int height,
-                                       const uint8_t cmap[][3],
-                                       size_t cmap_size, double gamma) {
+static void imaging_write_colormap_png_zscale(const char *filename,
+                                              const double *data, int width,
+                                              int height,
+                                              const uint8_t cmap[][3],
+                                              size_t cmap_size, double gamma) {
   size_t npix = (size_t)width * height;
 
   // 1) Compute mean & variance
@@ -366,9 +367,9 @@ static void imaging_write_image(struct space *s,
            image->base_name, image->frame_number);
 
   /* Write the image as an RGB PNG. */
-  imaging_write_colormap_png(filename, image_buff, image_data->xres,
-                             image_data->yres, plasma_colormap,
-                             plasma_colormap_size, 1.5);
+  imaging_write_colormap_png_zscale(filename, image_buff, image_data->xres,
+                                    image_data->yres, plasma_colormap,
+                                    plasma_colormap_size, 1.5);
 
   /* Free the image buffer. */
   free(image_buff);
