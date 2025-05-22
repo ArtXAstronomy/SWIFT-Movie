@@ -55,6 +55,7 @@ struct black_holes_properties;
 struct extra_io_properties;
 struct external_potential;
 struct forcing_terms;
+struct image_common_data;
 
 /**
  * @brief The different policies the #engine can follow.
@@ -689,6 +690,12 @@ struct engine {
   /* Flag to tell brute force checks a snapshot was recently written. */
   int force_checks_snapshot_flag;
 #endif
+
+  /*! Are we imaging? */
+  int with_imaging;
+
+  /*! The imaging data structure. */
+  struct image_common_data *image_data;
 };
 
 /* Function prototypes, engine.c. */
