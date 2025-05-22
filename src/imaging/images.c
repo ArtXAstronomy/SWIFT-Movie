@@ -170,25 +170,20 @@ static void imaging_write_colormap_png(const char *filename, const double *data,
   double mn = data[0], mx = data[0];
   size_t npix = (size_t)width * height;
   for (size_t i = 1; i < npix; i++) {
-    if (data[i] < mn)
-      mn = data[i];
-    if (data[i] > mx)
-      mx = data[i];
+    if (data[i] < mn) mn = data[i];
+    if (data[i] > mx) mx = data[i];
   }
   double inv_range = (mx > mn) ? 1.0 / (mx - mn) : 0.0;
 
   // 2) Allocate an RGB buffer
   unsigned char *rgb = malloc(3 * npix);
-  if (!rgb)
-    return;
+  if (!rgb) return;
 
   // 3) Map each sample into [0..cmap_size-1] and look up RGB
   for (size_t i = 0; i < npix; i++) {
     double norm = (data[i] - mn) * inv_range;
-    if (norm < 0.0)
-      norm = 0.0;
-    if (norm > 1.0)
-      norm = 1.0;
+    if (norm < 0.0) norm = 0.0;
+    if (norm > 1.0) norm = 1.0;
     size_t idx = (size_t)(norm * (cmap_size - 1) + 0.5);
     rgb[3 * i + 0] = cmap[idx][0];
     rgb[3 * i + 1] = cmap[idx][1];

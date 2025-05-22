@@ -159,54 +159,53 @@ void runner_do_imaging(struct runner *r, struct cell *c, int timer) {
 
     /* Choose the right function for the job. */
     switch (ptype) {
-    case 0: /* Gas */
-      error("Gas imaging not implemented yet.");
-      // if (strcmp(field_name, "density") == 0) {
-      //   runner_do_part_density_image(&image_data->images[i], ci);
-      // } else if (strcmp(field_name, "mass") == 0) {
-      //   runner_do_part_mass_image(&image_data->images[i], ci);
-      // } else if (strcmp(field_name, "temperature") == 0) {
-      //   runner_do_part_temperature_image(&image_data->images[i], ci);
-      // } else {
-      //   error("Unknown field name for gas: %s", field_name);
-      // }
-      break;
-    case 1: /* Dark matter */
-      if (strcmp(field_name, "mass") == 0) {
-        runner_do_gpart_mass_image(&image_data->images[i], i, c);
-      } else {
-        error("Unknown field name for dark matter: %s", field_name);
-      }
-      break;
-    case 2: /* Nothing */
-      error("PartType 2 is not supported for imaging.");
-      break;
-    case 3: /* Nothing */
-      error("PartType 3 is not supported for imaging.");
-      break;
-    case 4: /* Stars */
-      error("Stars imaging not implemented yet.");
-      // if (strcmp(field_name, "mass") == 0) {
-      //   runner_do_spart_mass_image(&image_data->images[i], ci);
-      // } else {
-      //   error("Unknown field name for stars: %s", field_name);
-      // }
-      break;
-    case 5: /* Black holes */
-      error("Black holes imaging not implemented yet.");
-      // if (strcmp(field_name, "mass") == 0) {
-      //   runner_do_bpart_mass_image(&image_data->images[i], ci);
-      // } else {
-      //   error("Unknown field name for black holes: %s", field_name);
-      // }
-      break;
-    default:
-      error("Unknown particle type: %d", ptype);
+      case 0: /* Gas */
+        error("Gas imaging not implemented yet.");
+        // if (strcmp(field_name, "density") == 0) {
+        //   runner_do_part_density_image(&image_data->images[i], ci);
+        // } else if (strcmp(field_name, "mass") == 0) {
+        //   runner_do_part_mass_image(&image_data->images[i], ci);
+        // } else if (strcmp(field_name, "temperature") == 0) {
+        //   runner_do_part_temperature_image(&image_data->images[i], ci);
+        // } else {
+        //   error("Unknown field name for gas: %s", field_name);
+        // }
+        break;
+      case 1: /* Dark matter */
+        if (strcmp(field_name, "mass") == 0) {
+          runner_do_gpart_mass_image(&image_data->images[i], i, c);
+        } else {
+          error("Unknown field name for dark matter: %s", field_name);
+        }
+        break;
+      case 2: /* Nothing */
+        error("PartType 2 is not supported for imaging.");
+        break;
+      case 3: /* Nothing */
+        error("PartType 3 is not supported for imaging.");
+        break;
+      case 4: /* Stars */
+        error("Stars imaging not implemented yet.");
+        // if (strcmp(field_name, "mass") == 0) {
+        //   runner_do_spart_mass_image(&image_data->images[i], ci);
+        // } else {
+        //   error("Unknown field name for stars: %s", field_name);
+        // }
+        break;
+      case 5: /* Black holes */
+        error("Black holes imaging not implemented yet.");
+        // if (strcmp(field_name, "mass") == 0) {
+        //   runner_do_bpart_mass_image(&image_data->images[i], ci);
+        // } else {
+        //   error("Unknown field name for black holes: %s", field_name);
+        // }
+        break;
+      default:
+        error("Unknown particle type: %d", ptype);
     }
   }
 
-  if (timer)
-    TIMER_TOC(timer_dograv_down);
+  if (timer) TIMER_TOC(timer_dograv_down);
 }
 
 static void runner_do_recursive_imaging_collect(struct runner *r,
