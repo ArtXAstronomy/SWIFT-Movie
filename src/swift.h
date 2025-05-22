@@ -55,6 +55,7 @@
 #include "hydro.h"
 #include "hydro_properties.h"
 #include "ic_info.h"
+#include "imaging/images.h"
 #include "lightcone/lightcone_array.h"
 #include "line_of_sight.h"
 #include "lock.h"
