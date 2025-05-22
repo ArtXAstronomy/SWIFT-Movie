@@ -177,5 +177,7 @@ void *runner_main(void *data);
 
 ticks runner_get_active_time(const struct runner *restrict r);
 void runner_reset_active_time(struct runner *restrict r);
+void runner_do_imaging(struct runner *r, struct cell *c, int timer);
+void runner_do_imaging_collect(struct runner *r, struct cell *c, int timer);
 
 #endif /* SWIFT_RUNNER_H */
