@@ -522,6 +522,38 @@ struct cell {
 
   struct ghost_stats ghost_statistics;
 
+  struct {
+
+    /*! An array of images for this cell (these get combined at the end) */
+    double **images;
+
+    /*! The number of images for this cell */
+    int num_images;
+
+    /*! The number of pixels along each axis */
+    int num_pixels[2];
+
+    /*! The padded location of the cell (each image gets some extra around it
+     * to avoid having to deal with the periodicity and particles leaving
+     * cells) */
+    double padded_loc[3];
+
+    /*! The padded width of the cell (each image gets some extra around it
+     * to avoid having to deal with the periodicity and particles leaving
+     * cells) */
+    double padded_width[3];
+
+    /*! The image generation task */
+    struct task *imaging;
+
+    /*! The image collection task at the top level */
+    struct task *imaging_collect;
+
+    /*! Flag for whether an image has been generated at this level */
+    int image_generated;
+
+  } image_data;
+
 } SWIFT_STRUCT_ALIGN;
 
 /* Convert cell location to ID. */
@@ -608,6 +640,7 @@ int cell_unskip_rt_tasks(struct cell *c, struct scheduler *s,
                          const int sub_cycle);
 int cell_unskip_black_holes_tasks(struct cell *c, struct scheduler *s);
 int cell_unskip_gravity_tasks(struct cell *c, struct scheduler *s);
+void cell_unskip_imaging_tasks(struct cell *c, struct scheduler *s);
 void cell_drift_part(struct cell *c, const struct engine *e, int force,
                      struct replication_list *replication_list_in);
 void cell_drift_gpart(struct cell *c, const struct engine *e, int force,
@@ -712,6 +745,7 @@ void cell_reorder_extra_sinks(struct cell *c, const ptrdiff_t sinks_offset);
 int cell_can_use_pair_mm(const struct cell *ci, const struct cell *cj,
                          const struct engine *e, const struct space *s,
                          const int use_rebuild_data, const int is_tree_walk);
+int cell_init_images(struct cell *c, const struct engine *e);
 
 /**
  * @brief Does a #cell contain no particle at all.
