@@ -34,8 +34,8 @@
 /**
  * @brief Make a mass image for dark matter.
  *
- * We treat dark matter as a top hat kernel with a radius of the softening
- * length.
+ * Dark matter is treated as point particles, so we just add the mass to the
+ * pixel.
  *
  * @param image_data The image data structure.
  * @param iimage The index of the image.
@@ -67,53 +67,11 @@ static void runner_do_gpart_mass_image(struct image_data *image_data,
     struct gpart *gp = &gparts[i];
 
     /* What pixel is this gpart in? */
-    int pid = (int)((gp->x[0] - xloc) / image_data->pixel_size[0]);
-    int pjd = (int)((gp->x[1] - yloc) / image_data->pixel_size[1]);
-
-    /* For dark matter we smooth based on the softening length. How many pixels
-     * does this cover? */
-    int nsoft = (int)ceil((gp->epsilon / image_data->pixel_size[0]));
+    int pid = (int)((gp->x[0] - xloc) / pixel_size[0]);
+    int pjd = (int)((gp->x[1] - yloc) / pixel_size[1]);
 
     /* If nsoft is 0/1 then we don't need to smooth. */
-    // if (nsoft <= 1) {
     image[pjd + pid * num_pixels[1]] += gp->mass;
-    continue;
-    // }
-
-    /* The square of the softening length for convenience. */
-    double soft2 = gp->epsilon * gp->epsilon;
-
-    /* Calculate the normalisation for a spherical top hat kernel with a
-     * radius of nsoft pixels. */
-    double norm = 1.0 / (M_PI * soft2 * soft2);
-
-    /* Loop over the pixels in the smoothing kernel. */
-    for (int j = -nsoft; j <= nsoft; j++) {
-      for (int k = -nsoft; k <= nsoft; k++) {
-        /* Get the pixel location. */
-        int x = pid + j;
-        int y = pjd + k;
-
-        /* Check if this pixel is in the image. */
-        if (x < 0 || x >= num_pixels[0] || y < 0 || y >= num_pixels[1]) {
-#ifdef SWIFT_DEBUG_CHECKS
-          error("Pixel out of bounds: %d %d %d %d", x, y, num_pixels[0],
-                num_pixels[1]);
-#endif
-          continue;
-        }
-
-        /* Calculate the distance from the gpart to this pixel. */
-        double dx = (x * image_data->pixel_size[0]) - gp->x[0];
-        double dy = (y * image_data->pixel_size[1]) - gp->x[1];
-        double r2 = dx * dx + dy * dy;
-
-        /* If this is within the smoothing radius, add to the pixel value. */
-        if (r2 < soft2) {
-          image[y + x * num_pixels[1]] += gp->mass * norm;
-        }
-      }
-    }
   }
 
   /* Flag that we generated an image. */
@@ -159,53 +117,54 @@ void runner_do_imaging(struct runner *r, struct cell *c, int timer) {
 
     /* Choose the right function for the job. */
     switch (ptype) {
-      case 0: /* Gas */
-        error("Gas imaging not implemented yet.");
-        // if (strcmp(field_name, "density") == 0) {
-        //   runner_do_part_density_image(&image_data->images[i], ci);
-        // } else if (strcmp(field_name, "mass") == 0) {
-        //   runner_do_part_mass_image(&image_data->images[i], ci);
-        // } else if (strcmp(field_name, "temperature") == 0) {
-        //   runner_do_part_temperature_image(&image_data->images[i], ci);
-        // } else {
-        //   error("Unknown field name for gas: %s", field_name);
-        // }
-        break;
-      case 1: /* Dark matter */
-        if (strcmp(field_name, "mass") == 0) {
-          runner_do_gpart_mass_image(&image_data->images[i], i, c);
-        } else {
-          error("Unknown field name for dark matter: %s", field_name);
-        }
-        break;
-      case 2: /* Nothing */
-        error("PartType 2 is not supported for imaging.");
-        break;
-      case 3: /* Nothing */
-        error("PartType 3 is not supported for imaging.");
-        break;
-      case 4: /* Stars */
-        error("Stars imaging not implemented yet.");
-        // if (strcmp(field_name, "mass") == 0) {
-        //   runner_do_spart_mass_image(&image_data->images[i], ci);
-        // } else {
-        //   error("Unknown field name for stars: %s", field_name);
-        // }
-        break;
-      case 5: /* Black holes */
-        error("Black holes imaging not implemented yet.");
-        // if (strcmp(field_name, "mass") == 0) {
-        //   runner_do_bpart_mass_image(&image_data->images[i], ci);
-        // } else {
-        //   error("Unknown field name for black holes: %s", field_name);
-        // }
-        break;
-      default:
-        error("Unknown particle type: %d", ptype);
+    case 0: /* Gas */
+      error("Gas imaging not implemented yet.");
+      // if (strcmp(field_name, "density") == 0) {
+      //   runner_do_part_density_image(&image_data->images[i], ci);
+      // } else if (strcmp(field_name, "mass") == 0) {
+      //   runner_do_part_mass_image(&image_data->images[i], ci);
+      // } else if (strcmp(field_name, "temperature") == 0) {
+      //   runner_do_part_temperature_image(&image_data->images[i], ci);
+      // } else {
+      //   error("Unknown field name for gas: %s", field_name);
+      // }
+      break;
+    case 1: /* Dark matter */
+      if (strcmp(field_name, "mass") == 0) {
+        runner_do_gpart_mass_image(&image_data->images[i], i, c);
+      } else {
+        error("Unknown field name for dark matter: %s", field_name);
+      }
+      break;
+    case 2: /* Nothing */
+      error("PartType 2 is not supported for imaging.");
+      break;
+    case 3: /* Nothing */
+      error("PartType 3 is not supported for imaging.");
+      break;
+    case 4: /* Stars */
+      error("Stars imaging not implemented yet.");
+      // if (strcmp(field_name, "mass") == 0) {
+      //   runner_do_spart_mass_image(&image_data->images[i], ci);
+      // } else {
+      //   error("Unknown field name for stars: %s", field_name);
+      // }
+      break;
+    case 5: /* Black holes */
+      error("Black holes imaging not implemented yet.");
+      // if (strcmp(field_name, "mass") == 0) {
+      //   runner_do_bpart_mass_image(&image_data->images[i], ci);
+      // } else {
+      //   error("Unknown field name for black holes: %s", field_name);
+      // }
+      break;
+    default:
+      error("Unknown particle type: %d", ptype);
     }
   }
 
-  if (timer) TIMER_TOC(timer_dograv_down);
+  if (timer)
+    TIMER_TOC(timer_dograv_down);
 }
 
 static void runner_do_recursive_imaging_collect(struct runner *r,
