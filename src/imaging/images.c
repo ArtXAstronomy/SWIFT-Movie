@@ -162,28 +162,34 @@ void imaging_init(struct swift_params *parameter_file, struct engine *e) {
  * @param cmap        Colormap: an array of [N][3] uint8_t entries {R,G,B}
  * @param cmap_size   Number of entries in cmap (e.g. 256)
  */
-static void imaging_write_colormap_png(const char *filename, const double *data,
-                                       int width, int height,
-                                       const uint8_t cmap[][3],
-                                       size_t cmap_size) {
+static void imaging_write_colormap_png_min_max(const char *filename,
+                                               const double *data, int width,
+                                               int height,
+                                               const uint8_t cmap[][3],
+                                               size_t cmap_size) {
   // 1) Find data min/max
   double mn = data[0], mx = data[0];
   size_t npix = (size_t)width * height;
   for (size_t i = 1; i < npix; i++) {
-    if (data[i] < mn) mn = data[i];
-    if (data[i] > mx) mx = data[i];
+    if (data[i] < mn)
+      mn = data[i];
+    if (data[i] > mx)
+      mx = data[i];
   }
   double inv_range = (mx > mn) ? 1.0 / (mx - mn) : 0.0;
 
   // 2) Allocate an RGB buffer
   unsigned char *rgb = malloc(3 * npix);
-  if (!rgb) return;
+  if (!rgb)
+    return;
 
   // 3) Map each sample into [0..cmap_size-1] and look up RGB
   for (size_t i = 0; i < npix; i++) {
     double norm = (data[i] - mn) * inv_range;
-    if (norm < 0.0) norm = 0.0;
-    if (norm > 1.0) norm = 1.0;
+    if (norm < 0.0)
+      norm = 0.0;
+    if (norm > 1.0)
+      norm = 1.0;
     size_t idx = (size_t)(norm * (cmap_size - 1) + 0.5);
     rgb[3 * i + 0] = cmap[idx][0];
     rgb[3 * i + 1] = cmap[idx][1];
@@ -191,6 +197,80 @@ static void imaging_write_colormap_png(const char *filename, const double *data,
   }
 
   // 4) Write to PNG (3 channels, stride = 3*width)
+  stbi_write_png(filename, width, height, 3, rgb, 3 * width);
+
+  free(rgb);
+}
+
+/**
+ * @brief Write a PNG whose pixels are mapped through an arbitrary colormap
+ *        with an automatic ±3σ contrast stretch and optional gamma.
+ *
+ * @param filename      Output filename (e.g. "out.png")
+ * @param data          Input data array of length width*height (double)
+ * @param width         Image width
+ * @param height        Image height
+ * @param cmap          Colormap: an array of [N][3] uint8_t entries {R,G,B}
+ * @param cmap_size     Number of entries in cmap (e.g. 256)
+ * @param gamma         Gamma to apply after stretch (e.g. 1.0 = linear,
+ *                      1.8–2.2 to brighten midtones)
+ */
+static void imaging_write_colormap_png(const char *filename, const double *data,
+                                       int width, int height,
+                                       const uint8_t cmap[][3],
+                                       size_t cmap_size, double gamma) {
+  size_t npix = (size_t)width * height;
+
+  // 1) Compute mean & variance
+  double sum = 0.0, sum2 = 0.0;
+  for (size_t i = 0; i < npix; ++i) {
+    double v = data[i];
+    sum += v;
+    sum2 += v * v;
+  }
+  double mean = sum / npix;
+  double var = sum2 / npix - mean * mean;
+  double sigma = (var > 0.0 ? sqrt(var) : 0.0);
+
+  // 2) Define our stretch window at ±3σ
+  double lo = mean - 3.0 * sigma;
+  double hi = mean + 3.0 * sigma;
+
+  // 3) Fallback for flat images
+  if (hi <= lo) {
+    lo = mean - 1e-3;
+    hi = mean + 1e-3;
+  }
+  double inv_range = 1.0 / (hi - lo);
+
+  // 4) Allocate RGB buffer
+  unsigned char *rgb = malloc(3 * npix);
+  if (!rgb)
+    return;
+
+  // 5) Map each sample → [0..1], apply γ, then colormap index
+  for (size_t i = 0; i < npix; ++i) {
+    // linear stretch to [0,1]
+    double norm = (data[i] - lo) * inv_range;
+    if (norm < 0.0)
+      norm = 0.0;
+    else if (norm > 1.0)
+      norm = 1.0;
+
+    // optional gamma
+    if (gamma != 1.0) {
+      norm = pow(norm, 1.0 / gamma);
+    }
+
+    // lookup index
+    size_t idx = (size_t)(norm * (cmap_size - 1) + 0.5);
+
+    rgb[3 * i + 0] = cmap[idx][0];
+    rgb[3 * i + 1] = cmap[idx][1];
+    rgb[3 * i + 2] = cmap[idx][2];
+  }
+
+  // 6) Write PNG (row-major, stride = 3*width)
   stbi_write_png(filename, width, height, 3, rgb, 3 * width);
 
   free(rgb);
@@ -288,7 +368,7 @@ static void imaging_write_image(struct space *s,
   /* Write the image as an RGB PNG. */
   imaging_write_colormap_png(filename, image_buff, image_data->xres,
                              image_data->yres, plasma_colormap,
-                             plasma_colormap_size);
+                             plasma_colormap_size, 1.5);
 
   /* Free the image buffer. */
   free(image_buff);
