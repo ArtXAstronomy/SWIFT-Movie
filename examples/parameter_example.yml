@@ -1087,13 +1087,16 @@ Lightcone1:
 
 # Parameters in the ImagesCommon section apply to all images but can be overridden in the ImageX sections.
 ImagesCommon:
-  subdir:          images      # All image output is written to this directory
-  x_resolution:    512         # Image resolution in x direction 
-  y_resolution:    512         # Image resolution in y direction
-  use_slice:       0           # Whether to project a slice or a full cube
-  slice_thickness: 5           # Thickness of the slice in code units
-  nimages:         1           # Number of images to make
-  write_pngs:      1           # Write PNG images (1) or raw arrays (0)
+  subdir:               images      # All image output is written to this directory
+  x_resolution:         512         # Image resolution in x direction 
+  y_resolution:         512         # Image resolution in y direction
+  use_slice:            0           # Whether to project a slice or a full cube
+  slice_thickness:      5           # Thickness of the slice in code units
+  nimages:              1           # Number of images to make
+  write_pngs:           1           # Write PNG images (1) or raw arrays (0)
+  delta_time:           1.01           # Time between statistics output
+  scale_factor_first:   0.1          # (Optional) Scale-factor of the first image (Cosmology only)
+  time_first:           0.0           # (Optional) Time of the first image (not Cosmology)
 
 # Image0 is the first image, this is specialised, there can be any number of images but ImageCommon:nimages 
 # must be set to the number of images. These specialised blocks can override the applicable parameters in ImagesCommon.
@@ -1101,4 +1104,14 @@ Image0:
   basename:        image0        # Base name of this image's output files 
   use_slice:       0             # Whether to project a slice or a full cube (this can override the common value)
   field_name:      mass          # Field to use for the image
+  particle_type:   0             # Particle type to use for the image (this can override the common value)
+
+
+# Some images need to be weighted by another image (e.g. mass weighted temperature). For these you can indicate the 
+# image that weigths it, i.e. this is a temperature image weight byt he mass image created fro Image0
+Image1:
+  basename:        image1        # Base name of this image's output files 
+  use_slice:       0             # Whether to project a slice or a full cube (this can override the common value)
+  field_name:      temperature   # Field to use for the image
   particle_type:   1             # Particle type to use for the image (this can override the common value)
+  weight_by:     0             # Image number to weight this image by (0 is the first image, 1 is the second, etc.)

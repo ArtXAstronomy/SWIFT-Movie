@@ -24,6 +24,7 @@
 
 /* Local includes. */
 #include "engine.h"
+#include "lightcone/projected_kernel.h"
 #include "parser.h"
 
 /**
@@ -56,6 +57,15 @@ struct image_common_data {
 
   /*! Output dir */
   char output_dir[256];
+
+  /*! Projected kernel lookup table */
+  struct projected_kernel_table *projected_kernel_table;
+
+  /*! Are we writing pngs? */
+  int write_pngs;
+
+  /*! Are we writing raw arrays? */
+  int write_raw_arrays;
 };
 
 /**
@@ -97,9 +107,14 @@ struct image_data {
 
   /*! Current frame number */
   int frame_number;
+
+  /*! The index of the image this one is weight by (-1 if unweighted) */
+  int weight_by;
 };
 
-void imaging_init(struct swift_params *parameter_file, struct engine *e);
+void imaging_init(struct image_common_data *image_data,
+                  struct swift_params *parameter_file, const int verbose,
+                  const double dim[3], const int nodeID);
 void imaging_write_images(struct engine *e);
 
 #endif /* SWIFT_IMAGES_H */

@@ -139,7 +139,8 @@ static void engine_dumper_init(struct engine *e) {
 
   /* Make sure the .dump file is not present, that is bad when starting up. */
   struct stat buf;
-  if (stat(dumpfile, &buf) == 0) unlink(dumpfile);
+  if (stat(dumpfile, &buf) == 0)
+    unlink(dumpfile);
 
   /* Thread does not exit, so nothing to do but create it. */
   pthread_create(&dumper, NULL, &engine_dumper_poll, e);
@@ -179,7 +180,8 @@ void engine_config(int restart, int fof, struct engine *e,
                    const char *restart_file, struct repartition *reparttype) {
 
   struct clocks_time tic, toc;
-  if (nodeID == 0) clocks_gettime(&tic);
+  if (nodeID == 0)
+    clocks_gettime(&tic);
 
   /* Store the values and initialise global fields. */
   e->nodeID = nodeID;
@@ -226,13 +228,13 @@ void engine_config(int restart, int fof, struct engine *e,
 #endif
 
   if (restart && fof) {
-    error(
-        "Can't configure the engine to be a stand-alone FOF and restarting "
-        "from a check-point at the same time!");
+    error("Can't configure the engine to be a stand-alone FOF and restarting "
+          "from a check-point at the same time!");
   }
 
   /* Welcome message */
-  if (e->nodeID == 0) message("Running simulation '%s'.", e->run_name);
+  if (e->nodeID == 0)
+    message("Running simulation '%s'.", e->run_name);
 
   /* Check-pointing properties */
 
@@ -252,7 +254,8 @@ void engine_config(int restart, int fof, struct engine *e,
   /* Get the number of queues */
   int nr_queues =
       parser_get_opt_param_int(params, "Scheduler:nr_queues", e->nr_threads);
-  if (nr_queues <= 0) nr_queues = e->nr_threads;
+  if (nr_queues <= 0)
+    nr_queues = e->nr_threads;
   if (nr_queues != nr_task_threads)
     message("Number of task queues set to %d", nr_queues);
   e->s->nr_queues = nr_queues;
@@ -323,14 +326,16 @@ void engine_config(int restart, int fof, struct engine *e,
     if ((e->policy & engine_policy_cputight) != engine_policy_cputight) {
 
       if (numa_available() >= 0) {
-        if (nodeID == 0) message("prefer NUMA-distant CPUs");
+        if (nodeID == 0)
+          message("prefer NUMA-distant CPUs");
 
         /* Get list of numa nodes of all available cores. */
         int *nodes = (int *)malloc(nr_affinity_cores * sizeof(int));
         int nnodes = 0;
         for (int i = 0; i < nr_affinity_cores; i++) {
           nodes[i] = numa_node_of_cpu(cpuid[i]);
-          if (nodes[i] > nnodes) nnodes = nodes[i];
+          if (nodes[i] > nnodes)
+            nnodes = nodes[i];
         }
         nnodes += 1;
 
@@ -376,7 +381,8 @@ void engine_config(int restart, int fof, struct engine *e,
     }
 #endif
   } else {
-    if (nodeID == 0) message("no processor affinity used");
+    if (nodeID == 0)
+      message("no processor affinity used");
 
   } /* with_aff */
 
@@ -384,7 +390,8 @@ void engine_config(int restart, int fof, struct engine *e,
    * do this once we've made at least one call to engine_entry_affinity and
    * maybe numa_node_of_cpu(sched_getcpu()), even if the engine isn't already
    * pinned. */
-  if (with_aff) engine_unpin();
+  if (with_aff)
+    engine_unpin();
 #endif
 
   if (with_aff && nodeID == 0) {
@@ -395,7 +402,8 @@ void engine_config(int restart, int fof, struct engine *e,
 #else
     printf("%s engine_init: cpu map is [ ", clocks_get_timesincestart());
 #endif
-    for (int i = 0; i < nr_affinity_cores; i++) printf("%i ", cpuid[i]);
+    for (int i = 0; i < nr_affinity_cores; i++)
+      printf("%i ", cpuid[i]);
     printf("].\n");
 #endif
   }
@@ -580,7 +588,7 @@ void engine_config(int restart, int fof, struct engine *e,
               "Time-step", "Time-bins", "RT-Updates", "Wall-clock time",
               clocks_getunit(), "Dead time", clocks_getunit());
       fflush(e->file_rt_subcycles);
-#endif  // compiled with RT
+#endif // compiled with RT
     }
 
     /* Initialize the SFH logger if running with star formation */
@@ -604,18 +612,23 @@ void engine_config(int restart, int fof, struct engine *e,
 
     /* Print information about the hydro scheme */
     if (e->policy & engine_policy_hydro) {
-      if (e->nodeID == 0) hydro_props_print(e->hydro_properties);
-      if (e->nodeID == 0) pressure_floor_print(e->pressure_floor_props);
-      if (e->nodeID == 0) entropy_floor_print(e->entropy_floor);
+      if (e->nodeID == 0)
+        hydro_props_print(e->hydro_properties);
+      if (e->nodeID == 0)
+        pressure_floor_print(e->pressure_floor_props);
+      if (e->nodeID == 0)
+        entropy_floor_print(e->entropy_floor);
     }
 
     /* Print information about the gravity scheme */
     if (e->policy & engine_policy_self_gravity)
-      if (e->nodeID == 0) gravity_props_print(e->gravity_properties);
+      if (e->nodeID == 0)
+        gravity_props_print(e->gravity_properties);
 
     /* Print information about the stellar scheme */
     if (e->policy & engine_policy_stars)
-      if (e->nodeID == 0) stars_props_print(e->stars_properties);
+      if (e->nodeID == 0)
+        stars_props_print(e->stars_properties);
 
     /* Print information about the RT scheme */
     if (e->policy & engine_policy_rt) {
@@ -643,10 +656,9 @@ void engine_config(int restart, int fof, struct engine *e,
 
     /* Check we have sensible time bounds */
     if (e->time_begin >= e->time_end)
-      error(
-          "Final simulation time (t_end = %e) must be larger than the start "
-          "time (t_beg = %e)",
-          e->time_end, e->time_begin);
+      error("Final simulation time (t_end = %e) must be larger than the start "
+            "time (t_beg = %e)",
+            e->time_end, e->time_begin);
 
     /* Check we have sensible time-step values */
     if (e->dt_min > e->dt_max)
@@ -660,21 +672,22 @@ void engine_config(int restart, int fof, struct engine *e,
       message("Absolute minimal timestep size: %e", e->time_base);
 
       float dt_min = e->time_end - e->time_begin;
-      while (dt_min > e->dt_min) dt_min /= 2.f;
+      while (dt_min > e->dt_min)
+        dt_min /= 2.f;
 
       message("Minimal timestep size (on time-line): %e", dt_min);
 
       float dt_max = e->time_end - e->time_begin;
-      while (dt_max > e->dt_max) dt_max /= 2.f;
+      while (dt_max > e->dt_max)
+        dt_max /= 2.f;
 
       message("Maximal timestep size (on time-line): %e", dt_max);
     }
 
     if (e->dt_min < e->time_base && e->nodeID == 0)
-      error(
-          "Minimal time-step size smaller than the absolute possible minimum "
-          "dt=%e",
-          e->time_base);
+      error("Minimal time-step size smaller than the absolute possible minimum "
+            "dt=%e",
+            e->time_base);
 
     if (!(e->policy & engine_policy_cosmology))
       if (e->dt_max > (e->time_end - e->time_begin) && e->nodeID == 0)
@@ -702,10 +715,14 @@ void engine_config(int restart, int fof, struct engine *e,
             e->a_first_snapshot, e->cosmology->a_begin);
 
       if (e->a_first_statistics < e->cosmology->a_begin)
-        error(
-            "Scale-factor of first stats output (%e) must be after the "
-            "simulation start a=%e.",
-            e->a_first_statistics, e->cosmology->a_begin);
+        error("Scale-factor of first stats output (%e) must be after the "
+              "simulation start a=%e.",
+              e->a_first_statistics, e->cosmology->a_begin);
+
+      if (e->a_first_imaging < e->cosmology->a_begin)
+        error("Scale-factor of first imaging output (%e) must be after the "
+              "simulation start a=%e.",
+              e->a_first_imaging, e->cosmology->a_begin);
 
       if (e->policy & engine_policy_structure_finding) {
 
@@ -713,10 +730,9 @@ void engine_config(int restart, int fof, struct engine *e,
           error("A value for `StructureFinding:delta_time` must be specified");
 
         if (e->a_first_stf_output < e->cosmology->a_begin)
-          error(
-              "Scale-factor of first stf output (%e) must be after the "
-              "simulation start a=%e.",
-              e->a_first_stf_output, e->cosmology->a_begin);
+          error("Scale-factor of first stf output (%e) must be after the "
+                "simulation start a=%e.",
+                e->a_first_stf_output, e->cosmology->a_begin);
       }
 
       if (e->policy & engine_policy_fof &&
@@ -726,10 +742,9 @@ void engine_config(int restart, int fof, struct engine *e,
           error("Time between FOF (%e) must be > 1.", e->delta_time_fof);
 
         if (e->a_first_fof_call < e->cosmology->a_begin)
-          error(
-              "Scale-factor of first fof call (%e) must be after the "
-              "simulation start a=%e.",
-              e->a_first_fof_call, e->cosmology->a_begin);
+          error("Scale-factor of first fof call (%e) must be after the "
+                "simulation start a=%e.",
+                e->a_first_fof_call, e->cosmology->a_begin);
       }
 
     } else {
@@ -744,16 +759,19 @@ void engine_config(int restart, int fof, struct engine *e,
 
       /* Find the time of the first output */
       if (e->time_first_snapshot < e->time_begin)
-        error(
-            "Time of first snapshot (%e) must be after the simulation start "
-            "t=%e.",
-            e->time_first_snapshot, e->time_begin);
+        error("Time of first snapshot (%e) must be after the simulation start "
+              "t=%e.",
+              e->time_first_snapshot, e->time_begin);
 
       if (e->time_first_statistics < e->time_begin)
-        error(
-            "Time of first stats output (%e) must be after the simulation "
-            "start t=%e.",
-            e->time_first_statistics, e->time_begin);
+        error("Time of first stats output (%e) must be after the simulation "
+              "start t=%e.",
+              e->time_first_statistics, e->time_begin);
+
+      if (e->time_first_imaging < e->time_begin)
+        error("Time of first imaging output (%e) must be after the "
+              "simulation start t=%e.",
+              e->time_first_imaging, e->time_begin);
 
       if (e->policy & engine_policy_structure_finding) {
 
@@ -783,9 +801,8 @@ void engine_config(int restart, int fof, struct engine *e,
 
 #if defined(WITH_CSDS)
     if ((e->policy & engine_policy_csds) && e->nodeID == 0)
-      message(
-          "WARNING: There is currently no way of predicting the output "
-          "size, please use the CSDS carefully");
+      message("WARNING: There is currently no way of predicting the output "
+              "size, please use the CSDS carefully");
 #endif
 
     /* Find the time of the first snapshot output */
@@ -793,6 +810,9 @@ void engine_config(int restart, int fof, struct engine *e,
 
     /* Find the time of the first statistics output */
     engine_compute_next_statistics_time(e);
+
+    /* Find the time of the first imaging output */
+    engine_compute_next_imaging_time(e);
 
     /* Find the time of the first line of sight output
      * and verify the outputs */
@@ -1053,10 +1073,11 @@ void engine_config(int restart, int fof, struct engine *e,
 
   /* Initialise the structure finder */
 #ifdef HAVE_VELOCIRAPTOR
-  if (e->policy & engine_policy_structure_finding) velociraptor_init(e);
+  if (e->policy & engine_policy_structure_finding)
+    velociraptor_init(e);
 #endif
 
-    /* Free the affinity stuff */
+  /* Free the affinity stuff */
 #if defined(HAVE_SETAFFINITY)
   if (with_aff) {
     free(cpuid);

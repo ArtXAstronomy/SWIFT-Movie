@@ -28,10 +28,101 @@
 
 /* Local includes. */
 #include "cell.h"
+#include "lightcone/projected_kernel.h"
 #include "runner.h"
 #include "timers.h"
 
 #include <math.h>
+
+/**
+ * @brief Loop over all pixels within a particle's kernel support radius
+ * and add the kernel value to the image.
+ *
+ * This is a generic function for smoothing any quantity into an image based
+ * on a particle's position and a kernel.
+ *
+ * @param image  The image to be smoothed into.
+ * @param x     The particle's position in world coordinates.
+ * @param nx    The number of pixels in the X direction.
+ * @param ny    The number of pixels in the Y direction.
+ * @param dx    The pixel size in the X direction.
+ * @param dy    The pixel size in the Y direction.
+ * @param x0    The lower-left corner of the image in world coordinates.
+ * @param y0    The lower-left corner of the image in world coordinates.
+ * @param h     The kernel width in world units.
+ * @param value The value to be added to the image.
+ * @param kt    The kernel type.
+ * @param p     The particle to be smoothed.
+ */
+static void runner_do_kernel_smoothed_image_loop(
+    double *image, double x[3], int nx, int ny, double dx, double dy, double x0,
+    double y0, double h, double value, struct projected_kernel_table *kt) {
+
+  /* Particle position in pixel coords */
+  double px = (x[0] - x0) / dx;
+  double py = (x[1] - y0) / dy;
+
+  /* Particle position in pixel coords */
+  int ix0 = (int)floor(px);
+  int iy0 = (int)floor(py);
+
+  /* Kernel support radius: u_max * h (in world units) */
+  double support = kt->u_max * h;
+  int delta_pix = (int)ceil(support / dx);
+
+  /* Loop over all pixels within ±delta_pix of the particle. */
+  for (int di = -delta_pix; di <= delta_pix; di++) {
+    int ix = ix0 + di;
+
+    /* Skip out-of-bounds pixels. */
+    if (ix < 0 || ix >= nx)
+      continue;
+
+    /* Compute the distance from the pixel center to the particle. */
+    double rx = fabs(px - (ix + 0.5)) * dx;
+
+    /* Loop over all pixels in the Y direction. */
+    for (int dj = -delta_pix; dj <= delta_pix; dj++) {
+      int iy = iy0 + dj;
+
+      /* Skip out-of-bounds pixels. */
+      if (iy < 0 || iy >= ny)
+        continue;
+
+      /* Compute the distance from the pixel center to the particle. */
+      double ry = fabs(py - (iy + 0.5)) * dy;
+
+      /* Compute the distance from the pixel center to the particle. */
+      double b = sqrt(rx * rx + ry * ry);
+
+      /* Compute the impact parameter. */
+      double u = b / h;
+
+      /* Skip out-of-bounds pixels. */
+      if (u >= kt->u_max)
+        continue;
+
+      /* Compute the kernel value. */
+      double w = projected_kernel_eval(kt, u);
+      image[ix * ny + iy] += value * w;
+    }
+  }
+}
+
+static double runner_get_part_weight(struct image_data *image_data,
+                                     struct part *p) {
+
+  /* Get the weight for this particle. */
+  if (strcmp(image_data->field_name, "mass") == 0) {
+    return p->mass;
+  } else if (strcmp(image_data->field_name, "density") == 0) {
+    return p->density.wcount + 32.0 / 3;
+  } else if (strcmp(image_data->field_name, "temperature") == 0) {
+    return p->cooling_data.subgrid_temp;
+  } else {
+    error("Unknown field name for gas: %s", image_data->field_name);
+  }
+}
 
 /**
  * @brief Make a smoothed mass image for dark matter.
@@ -44,8 +135,12 @@
  * @param iimage     Index of which image buffer to write into.
  * @param c          Cell containing the dark-matter particles.
  */
-static void runner_do_gpart_mass_image(struct image_data *image_data,
-                                       int iimage, struct cell *c) {
+static void
+runner_do_gpart_mass_image(struct image_common_data *image_common_data,
+                           int iimage, struct cell *c) {
+  /* Extract the image data. */
+  struct image_data *image_data = &image_common_data->images[iimage];
+
   /* Extract the particle list and count from the cell’s gravity data. */
   struct gpart *gparts = c->grav.parts;
   int gcount = c->grav.count;
@@ -88,18 +183,18 @@ static void runner_do_gpart_mass_image(struct image_data *image_data,
 
     /*
      * Compute cutoff radius in pixel units (3 × ε / dx).
-     * We’ll loop over all pixels within ±irad of the particle.
+     * We’ll loop over all pixels within ±delta_pix of the particle.
      */
     double eps_px = eps / dx;
     double radius = 3.0 * eps_px;
-    int irad = (int)ceil(radius);
+    int delta_pix = (int)ceil(radius);
 
     /*
      * Sanity: clamp to our buffer size.
      * If you ever need a bigger radius, enlarge MAX_RAD_PX.
      */
-    if (irad > MAX_RAD_PX) {
-      irad = MAX_RAD_PX;
+    if (delta_pix > MAX_RAD_PX) {
+      delta_pix = MAX_RAD_PX;
     }
 
     /*
@@ -110,8 +205,8 @@ static void runner_do_gpart_mass_image(struct image_data *image_data,
     double total_w = 0.0;
     double ix0 = floor(fx);
     double iy0 = floor(fy);
-    for (int di = -irad; di <= irad; di++) {
-      for (int dj = -irad; dj <= irad; dj++) {
+    for (int di = -delta_pix; di <= delta_pix; di++) {
+      for (int dj = -delta_pix; dj <= delta_pix; dj++) {
         /*
          * Center each pixel at (ix0 + 0.5 + di, iy0 + 0.5 + dj):
          * compute offset from true particle position.
@@ -124,7 +219,7 @@ static void runner_do_gpart_mass_image(struct image_data *image_data,
         double w =
             exp(-0.5 * r2 / (eps_px * eps_px)) / (2.0 * M_PI * eps_px * eps_px);
 
-        wbuf[di + irad][dj + irad] = w;
+        wbuf[di + delta_pix][dj + delta_pix] = w;
         total_w += w;
       }
     }
@@ -133,13 +228,13 @@ static void runner_do_gpart_mass_image(struct image_data *image_data,
      * 2) Normalize and distribute mass:
      *    each pixel gets gp->mass * (w / total_w)
      */
-    int base_ix = (int)ix0 - irad;
-    int base_iy = (int)iy0 - irad;
-    for (int di = 0; di <= 2 * irad; di++) {
+    int base_ix = (int)ix0 - delta_pix;
+    int base_iy = (int)iy0 - delta_pix;
+    for (int di = 0; di <= 2 * delta_pix; di++) {
       int ix = base_ix + di;
       if (ix < 0 || ix >= nx)
         continue; /* skip out-of-bounds */
-      for (int dj = 0; dj <= 2 * irad; dj++) {
+      for (int dj = 0; dj <= 2 * delta_pix; dj++) {
         int iy = base_iy + dj;
         if (iy < 0 || iy >= ny)
           continue;
@@ -148,6 +243,152 @@ static void runner_do_gpart_mass_image(struct image_data *image_data,
         image[ix * ny + iy] += gp->mass * w_norm;
       }
     }
+  }
+}
+
+/**
+ * @brief Mass-weighted image for gas particles using SPH smoothing.
+ *
+ * Each part is smoothed into the image over its SPH kernel.
+ *
+ * @param image_data The overall image settings (pixel size, etc.).
+ * @param iimage     Index of which image buffer to write into.
+ * @param c          Cell containing the gas particles.
+ */
+static void
+runner_do_part_mass_image(struct image_common_data *image_common_data,
+                          int iimage, struct cell *c) {
+
+  /* Extract the image data. */
+  struct image_data *image_data = &image_common_data->images[iimage];
+
+  /* Extract the particles. */
+  struct part *parts = c->hydro.parts;
+  int gcount = c->hydro.count;
+
+  /* Get the image data for convenience. */
+  double *image = c->image_data.images[iimage];
+  double x0 = c->image_data.padded_loc[0];
+  double y0 = c->image_data.padded_loc[1];
+  double dx = image_data->pixel_size[0];
+  double dy = image_data->pixel_size[1];
+  int nx = c->image_data.num_pixels[0];
+  int ny = c->image_data.num_pixels[1];
+
+  /* Get the kernel look up table. */
+  struct projected_kernel_table *kt = image_common_data->projected_kernel_table;
+
+  /* Loop over each particle. */
+  for (int i = 0; i < gcount; i++) {
+
+    /* Get the particle and its smoothing length and mass. */
+    struct part *p = &parts[i];
+    double h = p->h;
+    double mass = p->mass;
+
+    /* Adding this particles contribution to the image. */
+    runner_do_kernel_smoothed_image_loop(image, p->x, nx, ny, dx, dy, x0, y0, h,
+                                         mass, kt);
+  }
+}
+
+/**
+ * @brief Temperature image for gas particles using SPH smoothing.
+ *
+ * Each part is smoothed into the image over its SPH kernel.
+ *
+ * @param image_data The overall image settings (pixel size, etc.).
+ * @param iimage     Index of which image buffer to write into.
+ * @param c          Cell containing the gas particles.
+ */
+static void
+runner_do_part_temperature_image(struct image_common_data *image_common_data,
+                                 int iimage, struct cell *c) {
+
+  /* Extract the image data. */
+  struct image_data *image_data = &image_common_data->images[iimage];
+
+  /* Extract the particles. */
+  struct part *parts = c->hydro.parts;
+  int gcount = c->hydro.count;
+
+  /* Get the image data for convenience. */
+  double *image = c->image_data.images[iimage];
+  double x0 = c->image_data.padded_loc[0];
+  double y0 = c->image_data.padded_loc[1];
+  double dx = image_data->pixel_size[0];
+  double dy = image_data->pixel_size[1];
+  int nx = c->image_data.num_pixels[0];
+  int ny = c->image_data.num_pixels[1];
+
+  /* Get the kernel look up table. */
+  struct projected_kernel_table *kt = image_common_data->projected_kernel_table;
+
+  /* Loop over each particle. */
+  for (int i = 0; i < gcount; i++) {
+
+    /* Get the particle and its smoothing length and temperature. */
+    struct part *p = &parts[i];
+    double h = p->h;
+    double temp = p->cooling_data.subgrid_temp;
+
+    /* Adding this particles contribution to the image. */
+    runner_do_kernel_smoothed_image_loop(image, p->x, nx, ny, dx, dy, x0, y0, h,
+                                         temp, kt);
+  }
+}
+
+/**
+ * @brief Mass-weighted temperature image for gas particles using SPH smoothing.
+ *
+ * Each part is smoothed into the image over its SPH kernel.
+ *
+ * The temperatures will be weigthed by the particle mass. This means we will
+ * make two images, one for the mass and one for the temperature * mass, before
+ * dividing out the mass dependence.
+ *
+ * @param image_common_data The overall image settings (pixel size, etc.).
+ * @param iimage     Index of which image buffer to write into.
+ * @param c          Cell containing the gas particles.
+ */
+static void runner_do_part_weighted_temperature_image(
+    struct image_common_data *image_common_data, int iimage, struct cell *c) {
+
+  /* Extract the image data. */
+  struct image_data *image_data = &image_common_data->images[iimage];
+
+  /* Extract the weight image information. */
+  struct image_data *weight_image_data =
+      &image_common_data->images[image_data->weight_by];
+
+  /* Extract the particles. */
+  struct part *parts = c->hydro.parts;
+  int gcount = c->hydro.count;
+
+  /* Get the image data for convenience. */
+  double *image = c->image_data.images[iimage];
+  double x0 = c->image_data.padded_loc[0];
+  double y0 = c->image_data.padded_loc[1];
+  double dx = image_data->pixel_size[0];
+  double dy = image_data->pixel_size[1];
+  int nx = c->image_data.num_pixels[0];
+  int ny = c->image_data.num_pixels[1];
+
+  /* Get the kernel look up table. */
+  struct projected_kernel_table *kt = image_common_data->projected_kernel_table;
+
+  /* Loop over each particle. */
+  for (int i = 0; i < gcount; i++) {
+
+    /* Get the particle and its smoothing length and temperature. */
+    struct part *p = &parts[i];
+    double h = p->h;
+    double temp = p->cooling_data.subgrid_temp;
+    double weight = runner_get_part_weight(weight_image_data, p);
+
+    /* Adding this particles contribution to the image. */
+    runner_do_kernel_smoothed_image_loop(image, p->x, nx, ny, dx, dy, x0, y0, h,
+                                         temp * weight, kt);
   }
 }
 
@@ -188,23 +429,27 @@ void runner_do_imaging(struct runner *r, struct cell *c, int timer) {
     /* What field are we making an image of? */
     const char *field_name = image_data->images[i].field_name;
 
+    /* Are we weighting the image by another image? */
+    const int weight_by = image_data->images[i].weight_by;
+
     /* Choose the right function for the job. */
     switch (ptype) {
     case 0: /* Gas */
-      error("Gas imaging not implemented yet.");
-      // if (strcmp(field_name, "density") == 0) {
-      //   runner_do_part_density_image(&image_data->images[i], ci);
-      // } else if (strcmp(field_name, "mass") == 0) {
-      //   runner_do_part_mass_image(&image_data->images[i], ci);
-      // } else if (strcmp(field_name, "temperature") == 0) {
-      //   runner_do_part_temperature_image(&image_data->images[i], ci);
-      // } else {
-      //   error("Unknown field name for gas: %s", field_name);
-      // }
+      if (strcmp(field_name, "mass") == 0) {
+        runner_do_part_mass_image(image_data, i, c);
+        // } else if (strcmp(field_name, "density") == 0) {
+        //   runner_do_part_density_image(&image_data, i, c);
+      } else if (strcmp(field_name, "temperature") == 0 && weight_by == -1) {
+        runner_do_part_temperature_image(image_data, i, c);
+      } else if (strcmp(field_name, "temperature") == 0 && weight_by != -1) {
+        runner_do_part_weighted_temperature_image(image_data, i, c);
+      } else {
+        error("Unknown field name for gas: %s", field_name);
+      }
       break;
     case 1: /* Dark matter */
       if (strcmp(field_name, "mass") == 0) {
-        runner_do_gpart_mass_image(&image_data->images[i], i, c);
+        runner_do_gpart_mass_image(image_data, i, c);
       } else {
         error("Unknown field name for dark matter: %s", field_name);
       }
@@ -218,7 +463,7 @@ void runner_do_imaging(struct runner *r, struct cell *c, int timer) {
     case 4: /* Stars */
       error("Stars imaging not implemented yet.");
       // if (strcmp(field_name, "mass") == 0) {
-      //   runner_do_spart_mass_image(&image_data->images[i], ci);
+      //   runner_do_spart_mass_image(&image_data, i, c);
       // } else {
       //   error("Unknown field name for stars: %s", field_name);
       // }
@@ -226,7 +471,7 @@ void runner_do_imaging(struct runner *r, struct cell *c, int timer) {
     case 5: /* Black holes */
       error("Black holes imaging not implemented yet.");
       // if (strcmp(field_name, "mass") == 0) {
-      //   runner_do_bpart_mass_image(&image_data->images[i], ci);
+      //   runner_do_bpart_mass_image(&image_data, i, c);
       // } else {
       //   error("Unknown field name for black holes: %s", field_name);
       // }
@@ -322,7 +567,7 @@ void runner_do_imaging_collect(struct runner *r, struct cell *c, int timer) {
     /* Allocate an image to collect into. */
     double *top_image_buff;
     if (swift_memalign(
-            "top_image", (void **)&top_image_buff, SWIFT_STRUCT_ALIGNMENT,
+            "top_image_buff", (void **)&top_image_buff, SWIFT_STRUCT_ALIGNMENT,
             c->top->image_data.num_pixels[0] *
                 c->top->image_data.num_pixels[1] * sizeof(double)) != 0) {
       error("Failed to allocate memory for the top level image.");

@@ -92,8 +92,9 @@ enum engine_policy {
   engine_policy_power_spectra = (1 << 27),
   engine_policy_grid = (1 << 28),
   engine_policy_grid_hydro = (1 << 29),
+  engine_policy_imaging = (1 << 30),
 };
-#define engine_maxpolicy 30
+#define engine_maxpolicy 31
 extern const char *engine_policy_names[engine_maxpolicy + 1];
 
 /**
@@ -691,11 +692,19 @@ struct engine {
   int force_checks_snapshot_flag;
 #endif
 
-  /*! Are we imaging? */
-  int with_imaging;
-
   /*! The imaging data structure. */
   struct image_common_data *image_data;
+
+  /* Imaging output timing information */
+  double a_first_imaging;
+  double time_first_imaging;
+  double delta_time_imaging;
+
+  /* Integer time of the next imaging calculation and dump */
+  integertime_t ti_next_imaging;
+
+  /* Flag that we are doing imaging this timestep */
+  int imaging_this_timestep;
 };
 
 /* Function prototypes, engine.c. */
@@ -707,6 +716,7 @@ void engine_compute_next_fof_time(struct engine *e);
 void engine_compute_next_statistics_time(struct engine *e);
 void engine_compute_next_los_time(struct engine *e);
 void engine_compute_next_ps_time(struct engine *e);
+void engine_compute_next_imaging_time(struct engine *e);
 void engine_recompute_displacement_constraint(struct engine *e);
 void engine_unskip(struct engine *e);
 void engine_unskip_rt_sub_cycle(struct engine *e);
@@ -747,7 +757,7 @@ void engine_init(
     struct extra_io_properties *io_extra_props,
     struct fof_props *fof_properties, struct los_props *los_properties,
     struct lightcone_array_props *lightcone_array_properties,
-    struct ic_info *ics_metadata);
+    struct ic_info *ics_metadata, struct image_common_data *image_data);
 void engine_config(int restart, int fof, struct engine *e,
                    struct swift_params *params, int nr_nodes, int nodeID,
                    int nr_task_threads, int nr_pool_threads, int with_aff,

@@ -34,6 +34,7 @@
 #include "active.h"
 #include "csds_io.h"
 #include "distributed_io.h"
+#include "imaging/images.h"
 #include "kick.h"
 #include "lightcone/lightcone.h"
 #include "lightcone/lightcone_array.h"
@@ -71,7 +72,8 @@ void engine_finalize_trigger_recordings(struct engine *e) {
           get_integer_time_begin(e->ti_current, p->time_bin);
 
       /* Escape inhibited particles */
-      if (part_is_inhibited(p, e)) continue;
+      if (part_is_inhibited(p, e))
+        continue;
 
       /* We need to escape the special case of a particle that
        * actually ended its time-step on this very step */
@@ -105,7 +107,8 @@ void engine_finalize_trigger_recordings(struct engine *e) {
           get_integer_time_begin(e->ti_current, sp->time_bin);
 
       /* Escape inhibited particles */
-      if (spart_is_inhibited(sp, e)) continue;
+      if (spart_is_inhibited(sp, e))
+        continue;
 
       /* We need to escape the special case of a particle that
        * actually ended its time-step on this very step */
@@ -139,7 +142,8 @@ void engine_finalize_trigger_recordings(struct engine *e) {
           get_integer_time_begin(e->ti_current, bp->time_bin);
 
       /* Escape inhibited particles */
-      if (bpart_is_inhibited(bp, e)) continue;
+      if (bpart_is_inhibited(bp, e))
+        continue;
 
       /* We need to escape the special case of a particle that
        * actually ended its time-step on this very step */
@@ -213,9 +217,10 @@ int engine_dump_restarts(struct engine *e, const int drifted_all,
       restart_remove_previous(e->restart_file);
 
       /* Drift all particles first (may have just been done). */
-      if (!drifted_all) engine_drift_all(e, /*drift_mpole=*/1);
+      if (!drifted_all)
+        engine_drift_all(e, /*drift_mpole=*/1);
 
-        /* Free the foreign particles to get more breathing space. */
+      /* Free the foreign particles to get more breathing space. */
 #ifdef WITH_MPI
       if (e->free_foreign_when_dumping_restart)
         space_free_foreign_parts(e->s, /*clear_cell_pointers=*/1);
@@ -259,7 +264,8 @@ int engine_dump_restarts(struct engine *e, const int drifted_all,
 
   /* If we stopped by reaching the time limit, flag that we need to
    * run the resubmission command */
-  if (end_run_time && e->resubmit_after_max_hours) e->resubmit = 1;
+  if (end_run_time && e->resubmit_after_max_hours)
+    e->resubmit = 1;
 
   return exit_run;
 }
@@ -419,6 +425,7 @@ void engine_io(struct engine *e) {
   const int with_los = (e->policy & engine_policy_line_of_sight);
   const int with_fof = (e->policy & engine_policy_fof);
   const int with_power = (e->policy & engine_policy_power_spectra);
+  const int with_imaging = (e->policy & engine_policy_imaging);
 
   /* What kind of output are we getting? */
   enum output_type {
@@ -428,6 +435,7 @@ void engine_io(struct engine *e) {
     output_ps,
     output_stf,
     output_los,
+    output_imaging,
   };
 
   /* What kind of output do we want? And at which time ?
@@ -481,6 +489,17 @@ void engine_io(struct engine *e) {
     }
   }
 
+  /* Do we want to write an image? We check this using a flag to avoid the fact
+   * ti_end_min has been updated between unskip and here. */
+  if (with_imaging) {
+    if (e->imaging_this_timestep) {
+      if (e->ti_next_imaging < ti_output) {
+        ti_output = e->ti_next_imaging;
+        type = output_imaging;
+      }
+    }
+  }
+
   /* Store information before attempting extra dump-related drifts */
   const integertime_t ti_current = e->ti_current;
   const timebin_t max_active_bin = e->max_active_bin;
@@ -504,134 +523,141 @@ void engine_io(struct engine *e) {
     /* Write some form of output */
     switch (type) {
 
-      case output_snapshot:
+    case output_snapshot:
 
 #ifdef SWIFT_GRAVITY_FORCE_CHECKS
-        /* Indicate we are allowed to do a brute force calculation now */
-        e->force_checks_snapshot_flag = 1;
+      /* Indicate we are allowed to do a brute force calculation now */
+      e->force_checks_snapshot_flag = 1;
 #endif
 
-        /* Free the mesh memory to get some breathing space */
-        if ((e->policy & engine_policy_self_gravity) && e->s->periodic)
-          pm_mesh_free(e->mesh);
+      /* Free the mesh memory to get some breathing space */
+      if ((e->policy & engine_policy_self_gravity) && e->s->periodic)
+        pm_mesh_free(e->mesh);
 
-          /* Free the foreign particles to get more breathing space.
-           * If called, the FOF code itself will reallocate what it needs. */
+      /* Free the foreign particles to get more breathing space.
+       * If called, the FOF code itself will reallocate what it needs. */
 #ifdef WITH_MPI
-        space_free_foreign_parts(e->s, /*clear_cell_pointers=*/1);
+      space_free_foreign_parts(e->s, /*clear_cell_pointers=*/1);
 #endif
 
-        /* Do we want FoF group IDs in the snapshot? */
-        if (with_fof && e->snapshot_invoke_fof) {
-          engine_fof(e, /*dump_results=*/1, /*dump_debug=*/0,
-                     /*seed_black_holes=*/0, /*buffers allocated=*/0);
-        }
+      /* Do we want FoF group IDs in the snapshot? */
+      if (with_fof && e->snapshot_invoke_fof) {
+        engine_fof(e, /*dump_results=*/1, /*dump_debug=*/0,
+                   /*seed_black_holes=*/0, /*buffers allocated=*/0);
+      }
 
-        /* Do we want a corresponding VELOCIraptor output? */
-        if (with_stf && e->snapshot_invoke_stf && !e->stf_this_timestep) {
+      /* Do we want a corresponding VELOCIraptor output? */
+      if (with_stf && e->snapshot_invoke_stf && !e->stf_this_timestep) {
 
 #ifdef HAVE_VELOCIRAPTOR
-          velociraptor_invoke(e, /*linked_with_snap=*/1);
-          e->step_props |= engine_step_prop_stf;
+        velociraptor_invoke(e, /*linked_with_snap=*/1);
+        e->step_props |= engine_step_prop_stf;
 #else
-          error(
-              "Asking for a VELOCIraptor output but SWIFT was compiled without "
+        error("Asking for a VELOCIraptor output but SWIFT was compiled without "
               "the interface!");
 #endif
-        }
+      }
 
-        /* Do we want power spectrum outputs? */
-        if (with_power && e->snapshot_invoke_ps) {
-          calc_all_power_spectra(e->power_data, e->s, &e->threadpool,
-                                 e->verbose);
-        }
+      /* Do we want power spectrum outputs? */
+      if (with_power && e->snapshot_invoke_ps) {
+        calc_all_power_spectra(e->power_data, e->s, &e->threadpool, e->verbose);
+      }
 
-        /* Dump... */
-        engine_dump_snapshot(e, /*fof=*/0);
+      /* Dump... */
+      engine_dump_snapshot(e, /*fof=*/0);
 
-        /* Free the memory allocated for VELOCIraptor i/o. */
-        if (with_stf && e->snapshot_invoke_stf && e->s->gpart_group_data) {
+      /* Free the memory allocated for VELOCIraptor i/o. */
+      if (with_stf && e->snapshot_invoke_stf && e->s->gpart_group_data) {
 #ifdef HAVE_VELOCIRAPTOR
-          swift_free("gpart_group_data", e->s->gpart_group_data);
-          e->s->gpart_group_data = NULL;
+        swift_free("gpart_group_data", e->s->gpart_group_data);
+        e->s->gpart_group_data = NULL;
 #endif
-        }
+      }
 
-        /* Reallocate freed memory */
-        if ((e->policy & engine_policy_self_gravity) && e->s->periodic)
-          pm_mesh_allocate(e->mesh);
+      /* Reallocate freed memory */
+      if ((e->policy & engine_policy_self_gravity) && e->s->periodic)
+        pm_mesh_allocate(e->mesh);
 #ifdef WITH_MPI
-        engine_allocate_foreign_particles(e, /*fof=*/0);
+      engine_allocate_foreign_particles(e, /*fof=*/0);
 #endif
 
-        /* ... and find the next output time */
-        engine_compute_next_snapshot_time(e, /*restart=*/0);
-        break;
+      /* ... and find the next output time */
+      engine_compute_next_snapshot_time(e, /*restart=*/0);
+      break;
 
-      case output_statistics:
+    case output_statistics:
 
-        /* Dump */
-        engine_print_stats(e);
+      /* Dump */
+      engine_print_stats(e);
 
-        /* and move on */
-        engine_compute_next_statistics_time(e);
+      /* and move on */
+      engine_compute_next_statistics_time(e);
 
-        break;
+      break;
 
-      case output_stf:
+    case output_stf:
 
-        /* Free the mesh memory to get some breathing space */
-        if ((e->policy & engine_policy_self_gravity) && e->s->periodic)
-          pm_mesh_free(e->mesh);
+      /* Free the mesh memory to get some breathing space */
+      if ((e->policy & engine_policy_self_gravity) && e->s->periodic)
+        pm_mesh_free(e->mesh);
 #ifdef WITH_MPI
-        space_free_foreign_parts(e->s, /*clear_cell_pointers=*/1);
+      space_free_foreign_parts(e->s, /*clear_cell_pointers=*/1);
 #endif
 
 #ifdef HAVE_VELOCIRAPTOR
-        /* Unleash the raptor! */
-        if (!e->stf_this_timestep) {
-          velociraptor_invoke(e, /*linked_with_snap=*/0);
-          e->step_props |= engine_step_prop_stf;
-        }
+      /* Unleash the raptor! */
+      if (!e->stf_this_timestep) {
+        velociraptor_invoke(e, /*linked_with_snap=*/0);
+        e->step_props |= engine_step_prop_stf;
+      }
 
-        /* Reallocate freed memory */
-        if ((e->policy & engine_policy_self_gravity) && e->s->periodic)
-          pm_mesh_allocate(e->mesh);
+      /* Reallocate freed memory */
+      if ((e->policy & engine_policy_self_gravity) && e->s->periodic)
+        pm_mesh_allocate(e->mesh);
 #ifdef WITH_MPI
-        engine_allocate_foreign_particles(e, /*fof=*/0);
+      engine_allocate_foreign_particles(e, /*fof=*/0);
 #endif
 
-        /* ... and find the next output time */
-        engine_compute_next_stf_time(e);
+      /* ... and find the next output time */
+      engine_compute_next_stf_time(e);
 #else
-        error(
-            "Asking for a VELOCIraptor output but SWIFT was compiled without "
+      error("Asking for a VELOCIraptor output but SWIFT was compiled without "
             "the interface!");
 #endif
-        break;
+      break;
 
-      case output_los:
+    case output_los:
 
-        /* Compute the LoS */
-        do_line_of_sight(e);
+      /* Compute the LoS */
+      do_line_of_sight(e);
 
-        /* Move on */
-        engine_compute_next_los_time(e);
+      /* Move on */
+      engine_compute_next_los_time(e);
 
-        break;
+      break;
 
-      case output_ps:
+    case output_ps:
 
-        /* Compute the PS */
-        calc_all_power_spectra(e->power_data, e->s, &e->threadpool, e->verbose);
+      /* Compute the PS */
+      calc_all_power_spectra(e->power_data, e->s, &e->threadpool, e->verbose);
 
-        /* Move on */
-        engine_compute_next_ps_time(e);
+      /* Move on */
+      engine_compute_next_ps_time(e);
 
-        break;
+      break;
 
-      default:
-        error("Invalid dump type");
+    case output_imaging:
+
+      /* Dump */
+      imaging_write_images(e);
+
+      /* and move on */
+      engine_compute_next_imaging_time(e);
+
+      break;
+
+    default:
+      error("Invalid dump type");
     }
 
     /* We need to see whether whether we are in the pathological case
@@ -684,6 +710,17 @@ void engine_io(struct engine *e) {
       }
     }
 
+    /* Do we want to write an image? We check this using a flag to avoid the
+     * fact ti_end_min has been updated between unskip and here. */
+    if (with_imaging) {
+      if (e->imaging_this_timestep) {
+        if (e->ti_next_imaging < ti_output) {
+          ti_output = e->ti_next_imaging;
+          type = output_imaging;
+        }
+      }
+    }
+
   } /* While loop over output types */
 
   /* Restore the information we stored */
@@ -703,7 +740,8 @@ void engine_io(struct engine *e) {
 void engine_set_and_verify_snapshot_triggers(struct engine *e) {
 
   integertime_t ti_next_snap = e->ti_next_snapshot;
-  if (ti_next_snap == -1) ti_next_snap = max_nr_timesteps;
+  if (ti_next_snap == -1)
+    ti_next_snap = max_nr_timesteps;
 
   /* Time until the next snapshot */
   double time_to_next_snap;
@@ -762,7 +800,8 @@ void engine_compute_next_snapshot_time(struct engine *e, const int restart) {
                                &e->ti_next_snapshot);
 
     /* Unless we are restarting, check the allowed recording trigger time */
-    if (!restart) engine_set_and_verify_snapshot_triggers(e);
+    if (!restart)
+      engine_set_and_verify_snapshot_triggers(e);
 
     /* All done in the list case */
     return;
@@ -806,7 +845,8 @@ void engine_compute_next_snapshot_time(struct engine *e, const int restart) {
   /* Deal with last snapshot */
   if (!found_snapshot_time) {
     e->ti_next_snapshot = -1;
-    if (e->verbose) message("No further output time.");
+    if (e->verbose)
+      message("No further output time.");
   } else {
 
     /* Be nice, talk... */
@@ -824,7 +864,8 @@ void engine_compute_next_snapshot_time(struct engine *e, const int restart) {
 
     /* Unless we are restarting, set the recording triggers accordingly for the
      * next output */
-    if (!restart) engine_set_and_verify_snapshot_triggers(e);
+    if (!restart)
+      engine_set_and_verify_snapshot_triggers(e);
   }
 }
 
@@ -859,9 +900,9 @@ void engine_compute_next_statistics_time(struct engine *e) {
   while (time < time_end) {
 
     /* Output time on the integer timeline */
-    if (e->policy & engine_policy_cosmology)
+    if (e->policy & engine_policy_cosmology) {
       e->ti_next_stats = log(time / e->cosmology->a_begin) / e->time_base;
-    else
+    } else
       e->ti_next_stats = (time - e->time_begin) / e->time_base;
 
     /* Found it? */
@@ -879,7 +920,8 @@ void engine_compute_next_statistics_time(struct engine *e) {
   /* Deal with last statistics */
   if (!found_stats_time) {
     e->ti_next_stats = -1;
-    if (e->verbose) message("No further output time.");
+    if (e->verbose)
+      message("No further output time.");
   } else {
 
     /* Be nice, talk... */
@@ -895,6 +937,76 @@ void engine_compute_next_statistics_time(struct engine *e) {
       if (e->verbose)
         message("Next output time for stats set to t=%e.",
                 next_statistics_time);
+    }
+  }
+}
+
+/**
+ * @brief Computes the next time (on the time line) for imaging.
+ *
+ * @param e The #engine.
+ */
+void engine_compute_next_imaging_time(struct engine *e) {
+
+  /* Nothing to do if we are not imaging */
+  if (!(e->policy & engine_policy_imaging)) {
+    e->ti_next_imaging = -1;
+    return;
+  }
+
+  /* Find upper-bound on last output */
+  double time_end;
+  if (e->policy & engine_policy_cosmology)
+    time_end = e->cosmology->a_end * e->delta_time_imaging;
+  else
+    time_end = e->time_end + e->delta_time_imaging;
+
+  /* Find next image above current time */
+  double time;
+  if (e->policy & engine_policy_cosmology)
+    time = e->a_first_imaging;
+  else
+    time = e->time_first_imaging;
+
+  int found_img_time = 0;
+  while (time < time_end) {
+
+    /* Output time on the integer timeline */
+    if (e->policy & engine_policy_cosmology) {
+      e->ti_next_imaging = log(time / e->cosmology->a_begin) / e->time_base;
+    } else
+      e->ti_next_imaging = (time - e->time_begin) / e->time_base;
+
+    /* Found it? */
+    if (e->ti_next_imaging > e->ti_current) {
+      found_img_time = 1;
+      break;
+    }
+
+    if (e->policy & engine_policy_cosmology)
+      time *= e->delta_time_imaging;
+    else
+      time += e->delta_time_imaging;
+  }
+
+  /* Deal with last imaging */
+  if (!found_img_time) {
+    e->ti_next_imaging = -1;
+    if (e->verbose)
+      message("No further output time.");
+  } else {
+
+    /* Be nice, talk... */
+    if (e->policy & engine_policy_cosmology) {
+      const double next_imaging_time =
+          exp(e->ti_next_imaging * e->time_base) * e->cosmology->a_begin;
+      if (e->verbose)
+        message("Next time for imaging set to a=%e.", next_imaging_time);
+    } else {
+      const double next_imaging_time =
+          e->ti_next_imaging * e->time_base + e->time_begin;
+      if (e->verbose)
+        message("Next time for imaging set to t=%e.", next_imaging_time);
     }
   }
 }
@@ -950,7 +1062,8 @@ void engine_compute_next_los_time(struct engine *e) {
   /* Deal with last line of sight */
   if (!found_los_time) {
     e->ti_next_los = -1;
-    if (e->verbose) message("No further LOS output time.");
+    if (e->verbose)
+      message("No further LOS output time.");
   } else {
 
     /* Be nice, talk... */
@@ -1020,7 +1133,8 @@ void engine_compute_next_stf_time(struct engine *e) {
   /* Deal with last snapshot */
   if (!found_stf_time) {
     e->ti_next_stf = -1;
-    if (e->verbose) message("No further output time.");
+    if (e->verbose)
+      message("No further output time.");
   } else {
 
     /* Be nice, talk... */
@@ -1082,17 +1196,20 @@ void engine_compute_next_fof_time(struct engine *e) {
   /* Deal with last snapshot */
   if (!found_fof_time) {
     e->ti_next_fof = -1;
-    if (e->verbose) message("No further FoF time.");
+    if (e->verbose)
+      message("No further FoF time.");
   } else {
 
     /* Be nice, talk... */
     if (e->policy & engine_policy_cosmology) {
       const float next_fof_time =
           exp(e->ti_next_fof * e->time_base) * e->cosmology->a_begin;
-      if (e->verbose) message("Next FoF time set to a=%e.", next_fof_time);
+      if (e->verbose)
+        message("Next FoF time set to a=%e.", next_fof_time);
     } else {
       const float next_fof_time = e->ti_next_fof * e->time_base + e->time_begin;
-      if (e->verbose) message("Next FoF time set to t=%e.", next_fof_time);
+      if (e->verbose)
+        message("Next FoF time set to t=%e.", next_fof_time);
     }
   }
 }
@@ -1148,7 +1265,8 @@ void engine_compute_next_ps_time(struct engine *e) {
   /* Deal with last line of sight */
   if (!found_ps_time) {
     e->ti_next_ps = -1;
-    if (e->verbose) message("No further PS output time.");
+    if (e->verbose)
+      message("No further PS output time.");
   } else {
 
     /* Be nice, talk... */
@@ -1286,7 +1404,8 @@ void engine_io_check_snapshot_triggers(struct engine *e) {
 
   /* Time until the next snapshot */
   integertime_t ti_next_snap = e->ti_next_snapshot;
-  if (ti_next_snap == -1) ti_next_snap = max_nr_timesteps;
+  if (ti_next_snap == -1)
+    ti_next_snap = max_nr_timesteps;
 
   double time_to_next_snap;
   if (e->policy & engine_policy_cosmology) {
@@ -1306,10 +1425,9 @@ void engine_io_check_snapshot_triggers(struct engine *e) {
 
       /* Be vocal about this */
       if (e->verbose)
-        message(
-            "Snapshot will be dumped in %e U_t. Recording trigger for part "
-            "activated.",
-            e->snapshot_recording_triggers_part[i]);
+        message("Snapshot will be dumped in %e U_t. Recording trigger for part "
+                "activated.",
+                e->snapshot_recording_triggers_part[i]);
 
       /* We now need to loop over the particles to preemptively deduct the
        * extra time logged between the particles' start of step and the
@@ -1323,7 +1441,8 @@ void engine_io_check_snapshot_triggers(struct engine *e) {
             get_integer_time_begin(e->ti_current, p->time_bin);
 
         /* Escape inhibited particles */
-        if (part_is_inhibited(p, e)) continue;
+        if (part_is_inhibited(p, e))
+          continue;
 
         /* Time from the start of the particle's step to the snapshot */
         double total_time;
@@ -1384,7 +1503,8 @@ void engine_io_check_snapshot_triggers(struct engine *e) {
             get_integer_time_begin(e->ti_current, sp->time_bin);
 
         /* Escape inhibited particles */
-        if (spart_is_inhibited(sp, e)) continue;
+        if (spart_is_inhibited(sp, e))
+          continue;
 
         /* Time from the start of the particle's step to the snapshot */
         double total_time;
@@ -1444,7 +1564,8 @@ void engine_io_check_snapshot_triggers(struct engine *e) {
             get_integer_time_begin(e->ti_current, bp->time_bin);
 
         /* Escape inhibited particles */
-        if (bpart_is_inhibited(bp, e)) continue;
+        if (bpart_is_inhibited(bp, e))
+          continue;
 
         /* Time from the start of the particle's step to the snapshot */
         double total_time;

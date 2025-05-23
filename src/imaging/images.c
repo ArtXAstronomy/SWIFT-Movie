@@ -33,6 +33,7 @@
 
 /* Local includes. */
 #include "colormaps.h"
+#include "lightcone/projected_kernel.h"
 #include "parser.h"
 #include "tools.h"
 
@@ -43,21 +44,9 @@
  * @param e The engine data structure.
  *
  */
-void imaging_init(struct swift_params *parameter_file, struct engine *e) {
-
-  /* First flag that we are doing imaging. */
-  e->with_imaging = 1;
-
-  /* Allocate the image data structure. */
-  if (swift_memalign("images_common", (void **)&e->image_data,
-                     SWIFT_STRUCT_ALIGNMENT,
-                     sizeof(struct image_common_data)) != 0) {
-    error("Failed to allocate memory for the image data structure.");
-    return;
-  }
-
-  /* Get the image data for convenience. */
-  struct image_common_data *image_data = e->image_data;
+void imaging_init(struct image_common_data *image_data,
+                  struct swift_params *parameter_file, const int verbose,
+                  const double dim[3], const int nodeID) {
 
   /* Read the common data from the parameter file. */
   image_data->num_images =
@@ -76,13 +65,16 @@ void imaging_init(struct swift_params *parameter_file, struct engine *e) {
       parameter_file, "ImagesCommon:slice_thickness", 5.0);
   parser_get_opt_param_string(parameter_file, "ImagesCommon:subdir",
                               image_data->output_dir, "images");
+  image_data->write_pngs =
+      parser_get_opt_param_int(parameter_file, "ImagesCommon:write_pngs", 1);
+  image_data->write_raw_arrays = !image_data->write_pngs;
 
   /* Compute the pixel size, this is boxsize / resolution. */
-  image_data->pixel_size[0] = e->s->dim[0] / image_data->xres;
-  image_data->pixel_size[1] = e->s->dim[1] / image_data->yres;
+  image_data->pixel_size[0] = dim[0] / image_data->xres;
+  image_data->pixel_size[1] = dim[1] / image_data->yres;
 
   /* Does the output directory exist? If not, create it. */
-  if (e->nodeID == 0) {
+  if (nodeID == 0) {
     safe_checkdir(image_data->output_dir, /*create=*/1);
   }
 
@@ -123,31 +115,68 @@ void imaging_init(struct swift_params *parameter_file, struct engine *e) {
     image->slice_thickness = parser_get_opt_param_double(
         parameter_file, param_name, image_data->slice_thickness);
 
+    /* Is this image weighted by another image? */
+    snprintf(param_name, sizeof(param_name), "%s:weight_by", block_name);
+    image->weight_by = parser_get_opt_param_int(parameter_file, param_name, -1);
+
     /* Initialise the frame counter. */
     image->frame_number = 0;
 
-    /* Copy over the iamge diemensions. */
+    /* Copy over the image diemensions. */
     image->xres = image_data->xres;
     image->yres = image_data->yres;
     image->pixel_size[0] = image_data->pixel_size[0];
     image->pixel_size[1] = image_data->pixel_size[1];
   }
 
+  /* Ensure any weighting is being used on the same particle types and that
+   * the image being weighted exists. */
+  for (int i = 0; i < image_data->num_images; i++) {
+    struct image_data *image = &image_data->images[i];
+    if (image->weight_by >= 0) {
+      if (image->weight_by >= image_data->num_images) {
+        error("Image %d is weighted by image %d, which does not exist.",
+              image->weight_by, i);
+      }
+      if (image->particle_type !=
+          image_data->images[image->weight_by].particle_type) {
+        error("Image %d is weighted by image %d, but they are different "
+              "particle types (%d vs %d).",
+              image->weight_by, i, image->particle_type,
+              image_data->images[image->weight_by].particle_type);
+      }
+    }
+  }
+
+  /* Intialise the projected kernel table. */
+  image_data->projected_kernel_table = (struct projected_kernel_table *)malloc(
+      sizeof(struct projected_kernel_table));
+  projected_kernel_init(image_data->projected_kernel_table);
+
   /* Report some information for the hell of it. */
-  if (e->verbose) {
+  if (verbose) {
     message("Number of images: %d", image_data->num_images);
     message("Output directory: %s", image_data->output_dir);
     if (image_data->slice) {
-      message("  Slice mode: %s", image_data->slice ? "yes" : "no");
+      message("  Slice thickness: %g", image_data->slice_thickness);
     }
+    message("Image resolution: %dx%d", image_data->xres, image_data->yres);
+    message("Pixel size: %g x %g", image_data->pixel_size[0],
+            image_data->pixel_size[1]);
+    message("Writing PNGs: %s", image_data->write_pngs ? "yes" : "no");
+    message("Writing raw arrays: %s",
+            image_data->write_raw_arrays ? "yes" : "no");
     for (int i = 0; i < image_data->num_images; i++) {
       struct image_data *image = &image_data->images[i];
       message("Image %d: %s", i, image->base_name);
-      message("Particle type: %d", image->particle_type);
-      message("  Field name: %s", image->field_name);
-      message("  Resolution: %dx%d", image->xres, image->yres);
-      message("  Pixel size: %f x %f [Internal Units]", image->pixel_size[0],
-              image->pixel_size[1]);
+      message(" - Particle type: %d", image->particle_type);
+      message(" - Field name: %s", image->field_name);
+      if (image->output_dir != image_data->output_dir) {
+        message(" - Output directory: %s", image->output_dir);
+      }
+      if (!image_data->slice && image->slice) {
+        message(" - Slice thickness: %g", image->slice_thickness);
+      }
     }
   }
 }
@@ -313,18 +342,12 @@ static void imaging_combine_cell_images(struct space *s,
         int xloc = pid + j;
         int yloc = pjd + k;
 
+        /* Apply periodic boundary conditions. */
+        xloc = (xloc + image_data->xres) % image_data->xres;
+        yloc = (yloc + image_data->yres) % image_data->yres;
+
         /* Get the pixel index. */
         int idx = yloc + xloc * image_data->yres;
-
-        /* Check if this pixel is in the image. */
-        if (xloc < 0 || xloc >= image_data->xres || yloc < 0 ||
-            yloc >= image_data->yres) {
-#ifdef SWIFT_DEBUG_CHECKS
-          error("Pixel out of bounds: %d %d %d %d", xloc, yloc,
-                image_data->xres, image_data->yres);
-#endif
-          continue;
-        }
 
         /* Check if this pixel is in the image. */
         if (k < 0 || k >= num_pixels[0] || j < 0 || j >= num_pixels[1]) {
@@ -340,6 +363,31 @@ static void imaging_combine_cell_images(struct space *s,
       }
     }
   }
+}
+
+static void imaging_write_image_raw(const char *filename,
+                                    struct image_common_data *image_data,
+                                    struct image_data *image,
+                                    double *image_buff) {
+
+  /* Write the image as a raw array. */
+  FILE *fp = fopen(filename, "wb");
+  if (fp == NULL) {
+    error("Failed to open file %s for writing.", filename);
+    return;
+  }
+
+  /* Write the image data. */
+  size_t written = fwrite(image_buff, sizeof(double),
+                          image_data->xres * image_data->yres, fp);
+  if (written != (size_t)(image_data->xres * image_data->yres)) {
+    error("Failed to write all data to file %s.", filename);
+    fclose(fp);
+    return;
+  }
+
+  /* Close the file. */
+  fclose(fp);
 }
 
 static void imaging_write_image(struct space *s,
@@ -361,15 +409,98 @@ static void imaging_write_image(struct space *s,
   /* Combine the cell images ready to be written out. */
   imaging_combine_cell_images(s, image_data, image_number, image_buff);
 
-  /* Create the filename. */
+  /* Are we writing a PNG or a raw array? */
   char filename[256];
-  snprintf(filename, sizeof(filename), "%s/%s_%d.png", image_data->output_dir,
-           image->base_name, image->frame_number);
+  if (image_data->write_pngs) {
+    /* Create the filename. */
+    snprintf(filename, sizeof(filename), "%s/%s_%d.png", image_data->output_dir,
+             image->base_name, image->frame_number);
 
-  /* Write the image as an RGB PNG. */
-  imaging_write_colormap_png_min_max(filename, image_buff, image_data->xres,
-                                     image_data->yres, plasma_colormap,
-                                     plasma_colormap_size);
+    /* Write the image as an RGB PNG. */
+    imaging_write_colormap_png_min_max(filename, image_buff, image_data->xres,
+                                       image_data->yres, plasma_colormap,
+                                       plasma_colormap_size);
+  } else if (image_data->write_raw_arrays) {
+    /* Create the filename. */
+    snprintf(filename, sizeof(filename), "%s/%s_%d.dat", image_data->output_dir,
+             image->base_name, image->frame_number);
+    imaging_write_image_raw(filename, image_data, image, image_buff);
+  }
+
+  /* Free the image buffer. */
+  free(image_buff);
+
+  if (s->e->verbose) {
+    message("Wrote image to %s", filename);
+  }
+
+  /* Increment the frame number. */
+  image->frame_number++;
+}
+
+static void imaging_write_weighted_image(struct space *s,
+                                         struct image_common_data *image_data,
+                                         int image_number) {
+  /* Get the image data for convenience. */
+  struct image_data *image = &image_data->images[image_number];
+
+  /* Get the image for weighting too. */
+  struct image_data *weight_image = &image_data->images[image->weight_by];
+
+  /* Allocate an image buffer to collect each cells image into. */
+  double *image_buff;
+  if (swift_memalign("image_buff", (void **)&image_buff, SWIFT_STRUCT_ALIGNMENT,
+                     image_data->xres * image_data->yres * sizeof(double)) !=
+      0) {
+    error("Failed to allocate memory for the image buffer.");
+    return;
+  }
+  bzero(image_buff, image_data->xres * image_data->yres * sizeof(double));
+
+  /* Allocate an image buffer to for the weights. */
+  double *weight_buff;
+  if (swift_memalign(
+          "weight_buff", (void **)&weight_buff, SWIFT_STRUCT_ALIGNMENT,
+          image_data->xres * image_data->yres * sizeof(double)) != 0) {
+    error("Failed to allocate memory for the weight buffer.");
+    return;
+  }
+  bzero(weight_buff, image_data->xres * image_data->yres * sizeof(double));
+
+  /* Combine the cell images ready to be written out. */
+  imaging_combine_cell_images(s, image_data, image_number, image_buff);
+  imaging_combine_cell_images(s, image_data, image->weight_by, weight_buff);
+
+  /* Loop over the pixels dividing out the weights. */
+  size_t npix = (size_t)image_data->xres * image_data->yres;
+  for (size_t i = 0; i < npix; i++) {
+    if (weight_buff[i] > 0.0) {
+      image_buff[i] /= weight_buff[i];
+    } else {
+      image_buff[i] = 0.0;
+    }
+  }
+
+  /* We're done with the weights now. */
+  free(weight_buff);
+
+  /* Are we writing a PNG or a raw array? */
+  char filename[256];
+  if (image_data->write_pngs) {
+    /* Create the filename. */
+    snprintf(filename, sizeof(filename), "%s/%s_%d.png", image_data->output_dir,
+             image->base_name, image->frame_number);
+
+    /* Write the image as an RGB PNG. */
+    imaging_write_colormap_png_min_max(filename, image_buff, image_data->xres,
+                                       image_data->yres, plasma_colormap,
+                                       plasma_colormap_size);
+  } else if (image_data->write_raw_arrays) {
+    /* Create the filename. */
+    snprintf(filename, sizeof(filename), "%s/%s_%d.dat", image_data->output_dir,
+             image->base_name, image->frame_number);
+    imaging_write_image_raw(filename, image_data, image, image_buff);
+  }
 
   /* Free the image buffer. */
   free(image_buff);
@@ -388,6 +519,22 @@ void imaging_write_images(struct engine *e) {
 
   /* Loop over all images. */
   for (int i = 0; i < image_data->num_images; i++) {
-    imaging_write_image(e->s, image_data, i);
+
+    /* Are we weighting? */
+    if (image_data->images[i].weight_by >= 0) {
+
+      /* Write the image as a weighted image (this involves dividing out the
+       * weights). */
+      imaging_write_weighted_image(e->s, image_data, i);
+
+    } else {
+
+      /* Write the image as a normal image. */
+      imaging_write_image(e->s, image_data, i);
+    }
   }
+
+  /* Ok, we are done. Reset the flag for imaging so it can be reevaluated
+   * next timestep. */
+  e->imaging_this_timestep = 0;
 }
