@@ -339,6 +339,52 @@ runner_do_part_temperature_image(struct image_common_data *image_common_data,
 }
 
 /**
+ * @brief Mass image for star particles using SPH smoothing.
+ *
+ * Each spart is smoothed into the image over its SPH kernel.
+ *
+ * @param image_data The overall image settings (pixel size, etc.).
+ * @param iimage     Index of which image buffer to write into.
+ * @param c          Cell containing the gas particles.
+ */
+static void
+runner_do_spart_mass_image(struct image_common_data *image_common_data,
+                           int iimage, struct cell *c) {
+
+  /* Extract the image data. */
+  struct image_data *image_data = &image_common_data->images[iimage];
+
+  /* Extract the particles. */
+  struct spart *sparts = c->stars.parts;
+  int count = c->stars.count;
+
+  /* Get the image data for convenience. */
+  double *image = c->image_data.images[iimage];
+  double x0 = c->image_data.padded_loc[0];
+  double y0 = c->image_data.padded_loc[1];
+  double dx = image_data->pixel_size[0];
+  double dy = image_data->pixel_size[1];
+  int nx = c->image_data.num_pixels[0];
+  int ny = c->image_data.num_pixels[1];
+
+  /* Get the kernel look up table. */
+  struct projected_kernel_table *kt = image_common_data->projected_kernel_table;
+
+  /* Loop over each particle. */
+  for (int i = 0; i < count; i++) {
+
+    /* Get the particle and its smoothing length and temperature. */
+    struct spart *sp = &sparts[i];
+    double h = sp->h;
+    double mass = sp->mass;
+
+    /* Adding this particles contribution to the image. */
+    runner_do_kernel_smoothed_image_loop(image, sp->x, nx, ny, dx, dy, x0, y0,
+                                         h, mass, kt);
+  }
+}
+
+/**
  * @brief Mass-weighted temperature image for gas particles using SPH smoothing.
  *
  * Each part is smoothed into the image over its SPH kernel.
@@ -461,12 +507,11 @@ void runner_do_imaging(struct runner *r, struct cell *c, int timer) {
       error("PartType 3 is not supported for imaging.");
       break;
     case 4: /* Stars */
-      error("Stars imaging not implemented yet.");
-      // if (strcmp(field_name, "mass") == 0) {
-      //   runner_do_spart_mass_image(&image_data, i, c);
-      // } else {
-      //   error("Unknown field name for stars: %s", field_name);
-      // }
+      if (strcmp(field_name, "mass") == 0) {
+        runner_do_spart_mass_image(image_data, i, c);
+      } else {
+        error("Unknown field name for stars: %s", field_name);
+      }
       break;
     case 5: /* Black holes */
       error("Black holes imaging not implemented yet.");

@@ -107,6 +107,11 @@ void imaging_init(struct image_common_data *image_data,
     parser_get_opt_param_string(parameter_file, param_name, image->output_dir,
                                 image_data->output_dir);
 
+    /* Check that the output directory exists. */
+    if (nodeID == 0) {
+      safe_checkdir(image->output_dir, /*create=*/1);
+    }
+
     snprintf(param_name, sizeof(param_name), "%s:slice", block_name);
     image->slice =
         parser_get_opt_param_int(parameter_file, param_name, image_data->slice);
@@ -413,7 +418,7 @@ static void imaging_write_image(struct space *s,
   char filename[256];
   if (image_data->write_pngs) {
     /* Create the filename. */
-    snprintf(filename, sizeof(filename), "%s/%s_%d.png", image_data->output_dir,
+    snprintf(filename, sizeof(filename), "%s/%s_%d.png", image->output_dir,
              image->base_name, image->frame_number);
 
     /* Write the image as an RGB PNG. */
@@ -422,7 +427,7 @@ static void imaging_write_image(struct space *s,
                                        plasma_colormap_size);
   } else if (image_data->write_raw_arrays) {
     /* Create the filename. */
-    snprintf(filename, sizeof(filename), "%s/%s_%d.dat", image_data->output_dir,
+    snprintf(filename, sizeof(filename), "%s/%s_%d.dat", image->output_dir,
              image->base_name, image->frame_number);
     imaging_write_image_raw(filename, image_data, image, image_buff);
   }
@@ -488,7 +493,7 @@ static void imaging_write_weighted_image(struct space *s,
   char filename[256];
   if (image_data->write_pngs) {
     /* Create the filename. */
-    snprintf(filename, sizeof(filename), "%s/%s_%d.png", image_data->output_dir,
+    snprintf(filename, sizeof(filename), "%s/%s_%d.png", image->output_dir,
              image->base_name, image->frame_number);
 
     /* Write the image as an RGB PNG. */
@@ -497,7 +502,7 @@ static void imaging_write_weighted_image(struct space *s,
                                        plasma_colormap_size);
   } else if (image_data->write_raw_arrays) {
     /* Create the filename. */
-    snprintf(filename, sizeof(filename), "%s/%s_%d.dat", image_data->output_dir,
+    snprintf(filename, sizeof(filename), "%s/%s_%d.dat", image->output_dir,
              image->base_name, image->frame_number);
     imaging_write_image_raw(filename, image_data, image, image_buff);
   }
