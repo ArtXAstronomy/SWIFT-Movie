@@ -29,6 +29,7 @@
 #include "active.h"
 #include "engine.h"
 #include "feedback.h"
+#include "imaging/images.h"
 #include "space_getsid.h"
 
 extern int engine_star_resort_task_depth;
@@ -3402,6 +3403,11 @@ void cell_unskip_imaging_tasks(struct cell *c, struct scheduler *s) {
   if (c->grav.count == 0 && c->hydro.count == 0) {
     return;
   }
+
+  // /* Nothing to activate if we are doing a subvolume and are outside it. */
+  // if (!imaging_cell_overlaps_fov(e->image_data, c)) {
+  //   return;
+  // }
 
   /* If we have an imaging task, we need to unskip it (there's only one per
    * cell). */

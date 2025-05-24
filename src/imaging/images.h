@@ -66,6 +66,18 @@ struct image_common_data {
 
   /*! Are we writing raw arrays? */
   int write_raw_arrays;
+
+  /*! The image lower left corner. */
+  double origin[3];
+
+  /*! Are we imaging a subvolume? */
+  int subvolume;
+
+  /*! The centre of the subvolume (only applicable if subvolume is set) */
+  double subvolume_centre[3];
+
+  /*! The size of the subvolume (only applicable if subvolume is set) */
+  double fov[3];
 };
 
 /**
@@ -116,5 +128,8 @@ void imaging_init(struct image_common_data *image_data,
                   struct swift_params *parameter_file, const int verbose,
                   const double dim[3], const int nodeID);
 void imaging_write_images(struct engine *e);
+int imaging_cell_overlaps_fov(const struct image_common_data *image_data,
+                              const struct cell *c);
+void imaging_clean(struct image_common_data *image_data);
 
 #endif /* SWIFT_IMAGES_H */

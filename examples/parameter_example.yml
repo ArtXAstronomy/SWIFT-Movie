@@ -1097,6 +1097,9 @@ ImagesCommon:
   delta_time:           1.01           # Time between statistics output
   scale_factor_first:   0.1          # (Optional) Scale-factor of the first image (Cosmology only)
   time_first:           0.0           # (Optional) Time of the first image (not Cosmology)
+  subvolume:            0            # Whether to use a subvolume for the image (0 is no, 1 is yes) 
+  centre:               [0.0, 0.0, 0.0] # Centre of the image in code units (if subvolume is set to 1) 
+  fov:                  [100, 100, 100]          # Field of view of the image in code units (if subvolume is set to 1)
 
 # Image0 is the first image, this is specialised, there can be any number of images but ImageCommon:nimages 
 # must be set to the number of images. These specialised blocks can override the applicable parameters in ImagesCommon.

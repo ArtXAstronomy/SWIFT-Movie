@@ -49,29 +49,78 @@ void imaging_init(struct image_common_data *image_data,
                   const double dim[3], const int nodeID) {
 
   /* Read the common data from the parameter file. */
+
+  /* How many images are we going to create? */
   image_data->num_images =
       parser_get_param_int(parameter_file, "ImagesCommon:nimages");
   if (image_data->num_images <= 0) {
     error("Number of images must be greater than 0.");
     return;
   }
+
+  /* Get the image resolution. */
   image_data->xres = parser_get_opt_param_int(
       parameter_file, "ImagesCommon:x_resolution", 1080);
   image_data->yres = parser_get_opt_param_int(
       parameter_file, "ImagesCommon:y_resolution", 1080);
+
+  /* Are we only doing a slice? */
   image_data->slice =
       parser_get_opt_param_int(parameter_file, "ImagesCommon:slice", 0);
   image_data->slice_thickness = parser_get_opt_param_double(
       parameter_file, "ImagesCommon:slice_thickness", 5.0);
+
+  /* Where are we writing the images? */
   parser_get_opt_param_string(parameter_file, "ImagesCommon:subdir",
                               image_data->output_dir, "images");
+
+  /* PNGs or raw arrays? */
   image_data->write_pngs =
       parser_get_opt_param_int(parameter_file, "ImagesCommon:write_pngs", 1);
   image_data->write_raw_arrays = !image_data->write_pngs;
 
+  /* Are we doing a subvolume? */
+  image_data->subvolume =
+      parser_get_opt_param_int(parameter_file, "ImagesCommon:subvolume", 0);
+  image_data->subvolume_centre[0] = 0.0;
+  image_data->subvolume_centre[1] = 0.0;
+  image_data->subvolume_centre[2] = 0.0;
+  parser_get_opt_param_double_array(parameter_file, "ImagesCommon:centre", 3,
+                                    image_data->subvolume_centre);
+  if (image_data->subvolume) {
+    /* If we are doing a subvolume, get the size of the field of view. */
+    parser_get_opt_param_double_array(parameter_file, "ImagesCommon:fov", 3,
+                                      image_data->fov);
+    if (image_data->fov[0] <= 0 || image_data->fov[1] <= 0 ||
+        image_data->fov[2] <= 0) {
+      error("Field of view must be positive in all dimensions.");
+      return;
+    }
+  } else {
+    /* If we are not doing a subvolume, set the FOV to the box size. */
+    image_data->fov[0] = dim[0];
+    image_data->fov[1] = dim[1];
+    image_data->fov[2] = dim[2];
+  }
+
+  /* Set the origin of the image (this is either 0.0, 0.0, 0.0 or the edge of
+   * the subvolume). */
+  if (image_data->subvolume) {
+    image_data->origin[0] =
+        image_data->subvolume_centre[0] - image_data->fov[0] / 2.0;
+    image_data->origin[1] =
+        image_data->subvolume_centre[1] - image_data->fov[1] / 2.0;
+    image_data->origin[2] =
+        image_data->subvolume_centre[2] - image_data->fov[2] / 2.0;
+  } else {
+    image_data->origin[0] = 0.0;
+    image_data->origin[1] = 0.0;
+    image_data->origin[2] = 0.0;
+  }
+
   /* Compute the pixel size, this is boxsize / resolution. */
-  image_data->pixel_size[0] = dim[0] / image_data->xres;
-  image_data->pixel_size[1] = dim[1] / image_data->yres;
+  image_data->pixel_size[0] = image_data->fov[0] / image_data->xres;
+  image_data->pixel_size[1] = image_data->fov[1] / image_data->yres;
 
   /* Does the output directory exist? If not, create it. */
   if (nodeID == 0) {
@@ -329,10 +378,16 @@ static void imaging_combine_cell_images(struct space *s,
       continue;
     }
 
+    // /* Skip cells that are not in the image. */
+    // if (!imaging_cell_overlaps_fov(image_data, c)) {
+    //   continue;
+    // }
+
     /* Extract the image data from this cell. */
     double *cell_image = c->image_data.images[image_number];
-    double padded_loc[2] = {c->image_data.padded_loc[0],
-                            c->image_data.padded_loc[1]};
+    double padded_loc[2] = {c->image_data.padded_loc[0] - image_data->origin[0],
+                            c->image_data.padded_loc[1] -
+                                image_data->origin[1]};
     int num_pixels[2] = {c->image_data.num_pixels[0],
                          c->image_data.num_pixels[1]};
 
@@ -347,7 +402,18 @@ static void imaging_combine_cell_images(struct space *s,
         int xloc = pid + j;
         int yloc = pjd + k;
 
-        /* Apply periodic boundary conditions. */
+        /* Apply periodic boundary conditions if not doing a subvolume. */
+        if (!image_data->subvolume) {
+          xloc = (xloc + image_data->xres) % image_data->xres;
+          yloc = (yloc + image_data->yres) % image_data->yres;
+        } else {
+          /* If we are doing a subvolume, we need to check if the pixel is
+           * within the subvolume. */
+          if (xloc < 0 || xloc >= image_data->xres || yloc < 0 ||
+              yloc >= image_data->yres) {
+            continue; // Skip pixels outside the subvolume.
+          }
+        }
         xloc = (xloc + image_data->xres) % image_data->xres;
         yloc = (yloc + image_data->yres) % image_data->yres;
 
@@ -542,4 +608,77 @@ void imaging_write_images(struct engine *e) {
   /* Ok, we are done. Reset the flag for imaging so it can be reevaluated
    * next timestep. */
   e->imaging_this_timestep = 0;
+}
+
+/**
+ * @brief Clean up the imaging data.
+ *
+ * @param image_data The image data to clean up.
+ */
+void imaging_clean(struct image_common_data *image_data) {
+  if (image_data == NULL) {
+    return;
+  }
+
+  /* Free the images. */
+  if (image_data->images != NULL) {
+    free(image_data->images);
+    image_data->images = NULL;
+  }
+
+  /* Free the projected kernel table. */
+  if (image_data->projected_kernel_table != NULL) {
+    projected_kernel_clean(image_data->projected_kernel_table);
+    free(image_data->projected_kernel_table);
+    image_data->projected_kernel_table = NULL;
+  }
+
+  /* Free the image data structure itself. */
+  free(image_data);
+  image_data = NULL;
+}
+
+/**
+ * @brief Test if a cell is within the FOV.
+ *
+ * @param image_data The image data structure.
+ * @param c The cell to test.
+ *
+ * @return 1 if the cell is within the FOV, 0 otherwise.
+ */
+int imaging_cell_overlaps_fov(const struct image_common_data *image_data,
+                              const struct cell *c) {
+  /* If we are not doing a subvolume, all cells are in the FOV. */
+  if (!image_data->subvolume) {
+    return 1;
+  }
+
+  /* Padded cell boundaries */
+  const double cell_min[3] = {c->image_data.padded_loc[0],
+                              c->image_data.padded_loc[1],
+                              c->image_data.padded_loc[2]};
+  const double cell_max[3] = {
+      c->image_data.padded_loc[0] + c->image_data.padded_width[0],
+      c->image_data.padded_loc[1] + c->image_data.padded_width[1],
+      c->image_data.padded_loc[2] + c->image_data.padded_width[2]};
+
+  /* FOV boundaries */
+  const double fov_min[3] = {image_data->origin[0], image_data->origin[1],
+                             image_data->origin[2]};
+  const double fov_max[3] = {
+      image_data->origin[0] + image_data->fov[0],
+      image_data->origin[1] + image_data->fov[1],
+      image_data->origin[2] + image_data->fov[2],
+  };
+
+  /* Calculate overlap in each dimension */
+  const double overlap_x =
+      fmin(cell_max[0], fov_max[0]) - fmax(cell_min[0], fov_min[0]);
+  const double overlap_y =
+      fmin(cell_max[1], fov_max[1]) - fmax(cell_min[1], fov_min[1]);
+  const double overlap_z =
+      fmin(cell_max[2], fov_max[2]) - fmax(cell_min[2], fov_min[2]);
+
+  /* Check if overlap lengths are positive */
+  return (overlap_x > 0.0 && overlap_y > 0.0 && overlap_z > 0.0);
 }
