@@ -3528,11 +3528,11 @@ void engine_init(
   e->delta_time_statistics =
       parser_get_param_double(params, "Statistics:delta_time");
   e->a_first_imaging = parser_get_opt_param_double(
-      params, "ImagesCommon:scale_factor_first", 0.1);
+      params, "Imaging:scale_factor_first", 0.1);
   e->time_first_imaging =
-      parser_get_opt_param_double(params, "ImagesCommon:time_first", 0.0);
+      parser_get_opt_param_double(params, "Imaging:time_first", 0.0);
   e->delta_time_imaging =
-      parser_get_opt_param_double(params, "ImagesCommon:delta_time", 0.0);
+      parser_get_opt_param_double(params, "Imaging:delta_time", 0.0);
   e->ti_next_stats = 0;
   e->ti_next_stf = 0;
   e->ti_next_fof = 0;

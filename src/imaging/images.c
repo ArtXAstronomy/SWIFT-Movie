@@ -50,157 +50,35 @@ void imaging_init(struct image_common_data *image_data,
 
   /* Read the common data from the parameter file. */
 
-  /* How many images are we going to create? */
-  image_data->num_images =
-      parser_get_param_int(parameter_file, "ImagesCommon:nimages");
-  if (image_data->num_images <= 0) {
-    error("Number of images must be greater than 0.");
-    return;
-  }
-
   /* Get the image resolution. */
-  image_data->xres = parser_get_opt_param_int(
-      parameter_file, "ImagesCommon:x_resolution", 1080);
-  image_data->yres = parser_get_opt_param_int(
-      parameter_file, "ImagesCommon:y_resolution", 1080);
+  image_data->xres =
+      parser_get_opt_param_int(parameter_file, "Imaging:x_resolution", 1080);
+  image_data->yres =
+      parser_get_opt_param_int(parameter_file, "Imaging:y_resolution", 1080);
 
-  /* Are we only doing a slice? */
-  image_data->slice =
-      parser_get_opt_param_int(parameter_file, "ImagesCommon:slice", 0);
-  image_data->slice_thickness = parser_get_opt_param_double(
-      parameter_file, "ImagesCommon:slice_thickness", 5.0);
+  /* Initialise the frame number at 0. */
+  image_data->frame_number = 0;
 
   /* Where are we writing the images? */
-  parser_get_opt_param_string(parameter_file, "ImagesCommon:subdir",
+  parser_get_opt_param_string(parameter_file, "Imaging:subdir",
                               image_data->output_dir, "images");
 
-  /* PNGs or raw arrays? */
-  image_data->write_pngs =
-      parser_get_opt_param_int(parameter_file, "ImagesCommon:write_pngs", 1);
-  image_data->write_raw_arrays = !image_data->write_pngs;
-
-  /* Are we doing a subvolume? */
-  image_data->subvolume =
-      parser_get_opt_param_int(parameter_file, "ImagesCommon:subvolume", 0);
-  image_data->subvolume_centre[0] = 0.0;
-  image_data->subvolume_centre[1] = 0.0;
-  image_data->subvolume_centre[2] = 0.0;
-  parser_get_opt_param_double_array(parameter_file, "ImagesCommon:centre", 3,
-                                    image_data->subvolume_centre);
-  if (image_data->subvolume) {
-    /* If we are doing a subvolume, get the size of the field of view. */
-    parser_get_opt_param_double_array(parameter_file, "ImagesCommon:fov", 3,
-                                      image_data->fov);
-    if (image_data->fov[0] <= 0 || image_data->fov[1] <= 0 ||
-        image_data->fov[2] <= 0) {
-      error("Field of view must be positive in all dimensions.");
-      return;
-    }
-  } else {
-    /* If we are not doing a subvolume, set the FOV to the box size. */
-    image_data->fov[0] = dim[0];
-    image_data->fov[1] = dim[1];
-    image_data->fov[2] = dim[2];
-  }
-
-  /* Set the origin of the image (this is either 0.0, 0.0, 0.0 or the edge of
-   * the subvolume). */
-  if (image_data->subvolume) {
-    image_data->origin[0] =
-        image_data->subvolume_centre[0] - image_data->fov[0] / 2.0;
-    image_data->origin[1] =
-        image_data->subvolume_centre[1] - image_data->fov[1] / 2.0;
-    image_data->origin[2] =
-        image_data->subvolume_centre[2] - image_data->fov[2] / 2.0;
-  } else {
-    image_data->origin[0] = 0.0;
-    image_data->origin[1] = 0.0;
-    image_data->origin[2] = 0.0;
-  }
-
-  /* Compute the pixel size, this is boxsize / resolution. */
-  image_data->pixel_size[0] = image_data->fov[0] / image_data->xres;
-  image_data->pixel_size[1] = image_data->fov[1] / image_data->yres;
+  /* Basename for the images. */
+  parser_get_opt_param_string(parameter_file, "Imaging:basename",
+                              image_data->base_name, "image");
 
   /* Does the output directory exist? If not, create it. */
   if (nodeID == 0) {
     safe_checkdir(image_data->output_dir, /*create=*/1);
   }
 
-  /* Allocate the images data structs. */
-  if (swift_memalign("images", (void **)&image_data->images,
-                     SWIFT_STRUCT_ALIGNMENT,
-                     image_data->num_images * sizeof(struct image_data)) != 0) {
-    error("Failed to allocate memory for the images.");
-    return;
-  }
+  /* Angular field of view in radians. */
+  image_data->fov_angle[0] = M_PI / 3.0;  // 60 degrees
+  image_data->fov_angle[1] = M_PI / 3.0;  // 60 degrees
 
-  /* Read the image data from the parameter file from each ImageX block. */
-  for (int i = 0; i < image_data->num_images; i++) {
-    char block_name[256];
-    snprintf(block_name, sizeof(block_name), "Image%d", i);
-    struct image_data *image = &image_data->images[i];
-
-    /* Read the image data from the parameter file. */
-    char param_name[256];
-    snprintf(param_name, sizeof(param_name), "%s:basename", block_name);
-    parser_get_param_string(parameter_file, param_name, image->base_name);
-
-    snprintf(param_name, sizeof(param_name), "%s:field_name", block_name);
-    parser_get_param_string(parameter_file, param_name, image->field_name);
-
-    snprintf(param_name, sizeof(param_name), "%s:particle_type", block_name);
-    image->particle_type = parser_get_param_int(parameter_file, param_name);
-
-    snprintf(param_name, sizeof(param_name), "%s:subdir", block_name);
-    parser_get_opt_param_string(parameter_file, param_name, image->output_dir,
-                                image_data->output_dir);
-
-    /* Check that the output directory exists. */
-    if (nodeID == 0) {
-      safe_checkdir(image->output_dir, /*create=*/1);
-    }
-
-    snprintf(param_name, sizeof(param_name), "%s:slice", block_name);
-    image->slice =
-        parser_get_opt_param_int(parameter_file, param_name, image_data->slice);
-
-    snprintf(param_name, sizeof(param_name), "%s:slice_thickness", block_name);
-    image->slice_thickness = parser_get_opt_param_double(
-        parameter_file, param_name, image_data->slice_thickness);
-
-    /* Is this image weighted by another image? */
-    snprintf(param_name, sizeof(param_name), "%s:weight_by", block_name);
-    image->weight_by = parser_get_opt_param_int(parameter_file, param_name, -1);
-
-    /* Initialise the frame counter. */
-    image->frame_number = 0;
-
-    /* Copy over the image diemensions. */
-    image->xres = image_data->xres;
-    image->yres = image_data->yres;
-    image->pixel_size[0] = image_data->pixel_size[0];
-    image->pixel_size[1] = image_data->pixel_size[1];
-  }
-
-  /* Ensure any weighting is being used on the same particle types and that
-   * the image being weighted exists. */
-  for (int i = 0; i < image_data->num_images; i++) {
-    struct image_data *image = &image_data->images[i];
-    if (image->weight_by >= 0) {
-      if (image->weight_by >= image_data->num_images) {
-        error("Image %d is weighted by image %d, which does not exist.",
-              image->weight_by, i);
-      }
-      if (image->particle_type !=
-          image_data->images[image->weight_by].particle_type) {
-        error("Image %d is weighted by image %d, but they are different "
-              "particle types (%d vs %d).",
-              image->weight_by, i, image->particle_type,
-              image_data->images[image->weight_by].particle_type);
-      }
-    }
-  }
+  /* Camera distance from centre of the image. */
+  image_data->camera_distance =
+      parser_get_param_double(parameter_file, "Imaging:distance");
 
   /* Intialise the projected kernel table. */
   image_data->projected_kernel_table = (struct projected_kernel_table *)malloc(
@@ -209,256 +87,10 @@ void imaging_init(struct image_common_data *image_data,
 
   /* Report some information for the hell of it. */
   if (verbose) {
-    message("Number of images: %d", image_data->num_images);
     message("Output directory: %s", image_data->output_dir);
-    if (image_data->slice) {
-      message("  Slice thickness: %g", image_data->slice_thickness);
-    }
+    message("Base name: %s", image_data->base_name);
     message("Image resolution: %dx%d", image_data->xres, image_data->yres);
-    message("Pixel size: %g x %g", image_data->pixel_size[0],
-            image_data->pixel_size[1]);
-    message("Writing PNGs: %s", image_data->write_pngs ? "yes" : "no");
-    message("Writing raw arrays: %s",
-            image_data->write_raw_arrays ? "yes" : "no");
-    for (int i = 0; i < image_data->num_images; i++) {
-      struct image_data *image = &image_data->images[i];
-      message("Image %d: %s", i, image->base_name);
-      message(" - Particle type: %d", image->particle_type);
-      message(" - Field name: %s", image->field_name);
-      if (image->output_dir != image_data->output_dir) {
-        message(" - Output directory: %s", image->output_dir);
-      }
-      if (!image_data->slice && image->slice) {
-        message(" - Slice thickness: %g", image->slice_thickness);
-      }
-    }
   }
-}
-
-/**
- * @brief Write a PNG whose pixels are mapped through an arbitrary colormap.
- *
- * @param filename    Output filename (e.g. "out.png")
- * @param data        Input data array of length width*height (double)
- * @param width       Image width
- * @param height      Image height
- * @param cmap        Colormap: an array of [N][3] uint8_t entries {R,G,B}
- * @param cmap_size   Number of entries in cmap (e.g. 256)
- */
-static void imaging_write_colormap_png_min_max(const char *filename,
-                                               const double *data, int width,
-                                               int height,
-                                               const uint8_t cmap[][3],
-                                               size_t cmap_size) {
-  // 1) Find data min/max
-  double mn = data[0], mx = data[0];
-  size_t npix = (size_t)width * height;
-  for (size_t i = 1; i < npix; i++) {
-    if (data[i] < mn)
-      mn = data[i];
-    if (data[i] > mx)
-      mx = data[i];
-  }
-  double inv_range = (mx > mn) ? 1.0 / (mx - mn) : 0.0;
-
-  // 2) Allocate an RGB buffer
-  unsigned char *rgb = malloc(3 * npix);
-  if (!rgb)
-    return;
-
-  // 3) Map each sample into [0..cmap_size-1] and look up RGB
-  for (size_t i = 0; i < npix; i++) {
-    double norm = (data[i] - mn) * inv_range;
-    if (norm < 0.0)
-      norm = 0.0;
-    if (norm > 1.0)
-      norm = 1.0;
-    size_t idx = (size_t)(norm * (cmap_size - 1) + 0.5);
-    rgb[3 * i + 0] = cmap[idx][0];
-    rgb[3 * i + 1] = cmap[idx][1];
-    rgb[3 * i + 2] = cmap[idx][2];
-  }
-
-  // 4) Write to PNG (3 channels, stride = 3*width)
-  stbi_write_png(filename, width, height, 3, rgb, 3 * width);
-
-  free(rgb);
-}
-
-/**
- * @brief Write a PNG whose pixels are mapped through an arbitrary colormap
- *        with an automatic ±3σ contrast stretch and optional gamma.
- *
- * @param filename      Output filename (e.g. "out.png")
- * @param data          Input data array of length width*height (double)
- * @param width         Image width
- * @param height        Image height
- * @param cmap          Colormap: an array of [N][3] uint8_t entries {R,G,B}
- * @param cmap_size     Number of entries in cmap (e.g. 256)
- * @param gamma         Gamma to apply after stretch (e.g. 1.0 = linear,
- *                      1.8–2.2 to brighten midtones)
- */
-static void imaging_write_colormap_png_zscale(const char *filename,
-                                              const double *data, int width,
-                                              int height,
-                                              const uint8_t cmap[][3],
-                                              size_t cmap_size, double gamma) {
-  size_t npix = (size_t)width * height;
-
-  // 1) Compute mean & variance
-  double sum = 0.0, sum2 = 0.0;
-  for (size_t i = 0; i < npix; ++i) {
-    double v = data[i];
-    sum += v;
-    sum2 += v * v;
-  }
-  double mean = sum / npix;
-  double var = sum2 / npix - mean * mean;
-  double sigma = (var > 0.0 ? sqrt(var) : 0.0);
-
-  // 2) Define our stretch window at ±3σ
-  double lo = mean - 3.0 * sigma;
-  double hi = mean + 3.0 * sigma;
-
-  // 3) Fallback for flat images
-  if (hi <= lo) {
-    lo = mean - 1e-3;
-    hi = mean + 1e-3;
-  }
-  double inv_range = 1.0 / (hi - lo);
-
-  // 4) Allocate RGB buffer
-  unsigned char *rgb = malloc(3 * npix);
-  if (!rgb)
-    return;
-
-  // 5) Map each sample → [0..1], apply γ, then colormap index
-  for (size_t i = 0; i < npix; ++i) {
-    // linear stretch to [0,1]
-    double norm = (data[i] - lo) * inv_range;
-    if (norm < 0.0)
-      norm = 0.0;
-    else if (norm > 1.0)
-      norm = 1.0;
-
-    // optional gamma
-    if (gamma != 1.0) {
-      norm = pow(norm, 1.0 / gamma);
-    }
-
-    // lookup index
-    size_t idx = (size_t)(norm * (cmap_size - 1) + 0.5);
-
-    rgb[3 * i + 0] = cmap[idx][0];
-    rgb[3 * i + 1] = cmap[idx][1];
-    rgb[3 * i + 2] = cmap[idx][2];
-  }
-
-  // 6) Write PNG (row-major, stride = 3*width)
-  stbi_write_png(filename, width, height, 3, rgb, 3 * width);
-
-  free(rgb);
-}
-
-static void imaging_combine_cell_images(struct space *s,
-                                        struct image_common_data *image_data,
-                                        int image_number, double *image_buff) {
-
-  /* Get the cells ready to loop over them. */
-  struct cell *cells = s->cells_top;
-  int ncells = s->nr_cells;
-
-  /* Loop over all cells. */
-  for (int i = 0; i < ncells; i++) {
-    /* Get the cell. */
-    struct cell *c = &cells[i];
-
-    /* Skip empty cells. */
-    if (c->hydro.count == 0 || c->grav.count == 0) {
-      continue;
-    }
-
-    // /* Skip cells that are not in the image. */
-    // if (!imaging_cell_overlaps_fov(image_data, c)) {
-    //   continue;
-    // }
-
-    /* Extract the image data from this cell. */
-    double *cell_image = c->image_data.images[image_number];
-    double padded_loc[2] = {c->image_data.padded_loc[0] - image_data->origin[0],
-                            c->image_data.padded_loc[1] -
-                                image_data->origin[1]};
-    int num_pixels[2] = {c->image_data.num_pixels[0],
-                         c->image_data.num_pixels[1]};
-
-    /* Where is this cell in the whole image? */
-    int pid = (int)(padded_loc[0] / image_data->pixel_size[0]);
-    int pjd = (int)(padded_loc[1] / image_data->pixel_size[1]);
-
-    /* Loop over the pixels in the image. */
-    for (int j = 0; j < num_pixels[0]; j++) {
-      for (int k = 0; k < num_pixels[1]; k++) {
-        /* Get the pixel location in the image. */
-        int xloc = pid + j;
-        int yloc = pjd + k;
-
-        /* Apply periodic boundary conditions if not doing a subvolume. */
-        if (!image_data->subvolume) {
-          xloc = (xloc + image_data->xres) % image_data->xres;
-          yloc = (yloc + image_data->yres) % image_data->yres;
-        } else {
-          /* If we are doing a subvolume, we need to check if the pixel is
-           * within the subvolume. */
-          if (xloc < 0 || xloc >= image_data->xres || yloc < 0 ||
-              yloc >= image_data->yres) {
-            continue; // Skip pixels outside the subvolume.
-          }
-        }
-        xloc = (xloc + image_data->xres) % image_data->xres;
-        yloc = (yloc + image_data->yres) % image_data->yres;
-
-        /* Get the pixel index. */
-        int idx = yloc + xloc * image_data->yres;
-
-        /* Check if this pixel is in the image. */
-        if (k < 0 || k >= num_pixels[0] || j < 0 || j >= num_pixels[1]) {
-#ifdef SWIFT_DEBUG_CHECKS
-          error("Pixel out of bounds: %d %d %d %d", xloc, yloc, num_pixels[0],
-                num_pixels[1]);
-#endif
-          continue;
-        }
-
-        /* Add the cell image to the image buffer. */
-        image_buff[idx] += cell_image[k + j * num_pixels[1]];
-      }
-    }
-  }
-}
-
-static void imaging_write_image_raw(const char *filename,
-                                    struct image_common_data *image_data,
-                                    struct image_data *image,
-                                    double *image_buff) {
-
-  /* Write the image as a raw array. */
-  FILE *fp = fopen(filename, "wb");
-  if (fp == NULL) {
-    error("Failed to open file %s for writing.", filename);
-    return;
-  }
-
-  /* Write the image data. */
-  size_t written = fwrite(image_buff, sizeof(double),
-                          image_data->xres * image_data->yres, fp);
-  if (written != (size_t)(image_data->xres * image_data->yres)) {
-    error("Failed to write all data to file %s.", filename);
-    fclose(fp);
-    return;
-  }
-
-  /* Close the file. */
-  fclose(fp);
 }
 
 static void imaging_write_image(struct space *s,
@@ -681,4 +313,383 @@ int imaging_cell_overlaps_fov(const struct image_common_data *image_data,
 
   /* Check if overlap lengths are positive */
   return (overlap_x > 0.0 && overlap_y > 0.0 && overlap_z > 0.0);
+}
+
+/**
+ * @brief A mapper function to create all the FOS images at once for each cell.
+ *
+ * @param image_data The image data structure.
+ * @param c The cell to process.
+ */
+void imaging_cell_mapper(void *map_data, int num_elements, void *extra_data) {
+
+  /* Unpack the data we have been given. */
+  struct engine *e = (struct engine *)extra_data;
+  struct space *s = e->s;
+  struct cell *cells = s->cells_top;
+  const double dim[3] = {s->dim[0], s->dim[1], s->dim[2]};
+
+  /* Get the iamge data we will need. */
+  struct image_common_data *image_data = (struct image_common_data *)map_data;
+  double image_centre[3] = {dim[0] * 0.5, dim[1] * 0.5, dim[2] * 0.5};
+  double camera_distance = image_data->camera_distance;
+  int xres = image_data->xres;
+  int yres = image_data->yres;
+  int angular_fov[2] = {image_data->fov_angle[0], image_data->fov_angle[1]};
+
+  /* Scale factor: image plane spans [-scale_x, scale_x] and [-scale_y,
+   * scale_y] */
+  double scale_x = camera_distance * tan(angular_fov[0] / 2.0);
+  double scale_y = camera_distance * tan(angular_fov[1] / 2.0);
+
+  /* Threadpool id of current thread. */
+  short int tpid = threadpool_gettid();
+
+  /* Get each of the images for this thread. */
+  double *dm_image = image_common_data->dm_images[tpid];
+  double *gas_image = image_common_data->gas_images[tpid];
+  double *stars_image = image_common_data->stars_images[tpid];
+  double *gas_temp_image = image_common_data->gas_temp_images[tpid];
+
+  /* Loop over the cells we have been given. */
+  for (int i = 0; i < num_elements; i++) {
+
+    /* Get the cell index. */
+    int cid = (size_t)(map_data) + i;
+
+    /* Get the cell. */
+    struct cell *c = &cells[cid];
+
+    /* Skip empty cells. */
+    if (c->hydro.count == 0 && c->grav.count == 0) {
+      continue;
+    }
+
+    /* Loop over all dark matter particles in this cell. */
+    for (int j = 0; j < c->grav.count; j++) {
+      /* Get the dark matter particle. */
+      struct gpart *gp = &c->grav.parts[j];
+
+      /* Skip if not a dark matter particle. */
+      if (gp->type != swift_type_dark_matter) {
+        continue;
+      }
+
+      /* Get the relative position of the particle to the image centre. */
+      double pos[3] = {gp->pos[0] - image_centre[0],
+                       gp->pos[1] - image_centre[1],
+                       gp->pos[2] - image_centre[2]};
+
+      /* Project the particle onto the image plane in angular coordinates at
+       * the camera distance. */
+      double theta = atan2(pos[1], pos[0]);
+      double phi = atan2(pos[2], sqrt(pos[0] * pos[0] + pos[1] * pos[1]));
+      double r = camera_distance * tan(phi);
+      double x = r * cos(theta);
+      double y = r * sin(theta);
+
+      /* Normalized coordinates in [-1, 1] */
+      double nx = x / scale_x;
+      double ny = y / scale_y;
+
+      /* Convert to pixel coordinates */
+      int ix = (int)((nx + 1.0) * 0.5 * xres);
+      int iy = (int)((ny + 1.0) * 0.5 * yres);
+
+      /* Bounds check and increment image */
+      if (ix >= 0 && ix < xres && iy >= 0 && iy < yres) {
+        int index = iy * xres + ix;
+        dm_image[index] += gp->mass;
+      }
+    }
+
+    /* Loop over all gas particles in this cell. */
+    for (int j = 0; j < c->hydro.count; j++) {
+      /* Get the gas particle. */
+      struct part *p = &c->hydro.parts[j];
+
+      /* Get the relative position of the particle to the image centre. */
+      double pos[3] = {p->pos[0] - image_centre[0], p->pos[1] - image_centre[1],
+                       p->pos[2] - image_centre[2]};
+
+      /* Project the particle onto the image plane in angular coordinates at
+       * the camera distance. */
+      double theta = atan2(pos[1], pos[0]);
+      double phi = atan2(pos[2], sqrt(pos[0] * pos[0] + pos[1] * pos[1]));
+      double r = camera_distance * tan(phi);
+      double x = r * cos(theta);
+      double y = r * sin(theta);
+
+      /* Normalized coordinates in [-1, 1] */
+      double nx = x / scale_x;
+      double ny = y / scale_y;
+
+      /* Convert to pixel coordinates */
+      int ix = (int)((nx + 1.0) * 0.5 * xres);
+      int iy = (int)((ny + 1.0) * 0.5 * yres);
+
+      /* Bounds check and increment image */
+      if (ix >= 0 && ix < xres && iy >= 0 && iy < yres) {
+        int index = iy * xres + ix;
+        gas_image[index] += p->mass;
+        gas_temp_image[index] += p->cooling_data.subgrid_temp * p->mass;
+      }
+    }
+
+    /* Loop over all star particles in this cell. */
+    for (int j = 0; j < c->stars.count; j++) {
+      /* Get the star particle. */
+      struct spart *sp = &c->stars.parts[j];
+
+      /* Get the relative position of the particle to the image centre. */
+      double pos[3] = {sp->pos[0] - image_centre[0],
+                       sp->pos[1] - image_centre[1],
+                       sp->pos[2] - image_centre[2]};
+
+      /* Project the particle onto the image plane in angular coordinates at
+       * the camera distance. */
+      double theta = atan2(pos[1], pos[0]);
+      double phi = atan2(pos[2], sqrt(pos[0] * pos[0] + pos[1] * pos[1]));
+      double r = camera_distance * tan(phi);
+      double x = r * cos(theta);
+      double y = r * sin(theta);
+
+      /* Normalized coordinates in [-1, 1] */
+      double nx = x / scale_x;
+      double ny = y / scale_y;
+
+      /* Convert to pixel coordinates */
+      int ix = (int)((nx + 1.0) * 0.5 * xres);
+      int iy = (int)((ny + 1.0) * 0.5 * yres);
+
+      /* Bounds check and increment image */
+      if (ix >= 0 && ix < xres && iy >= 0 && iy < yres) {
+        int index = iy * xres + ix;
+        stars_image[index] += sp->mass;
+      }
+    }
+  }
+}
+
+void imaging_allocate_threadimages_mapper(void *map_data, int num_elements,
+                                          void *extra_data) {
+  /* Get the threadpool id of the current thread. */
+  short int tpid = threadpool_gettid();
+
+  /* Get this threads image data. */
+  struct image_common_data *image_data = (struct image_common_data *)extra_data;
+
+  /* Allocate the images for this thread. */
+  if (swift_memalign("dm_images", (void **)&image_data->dm_images[tpid],
+                     SWIFT_STRUCT_ALIGNMENT,
+                     image_data->xres * image_data->yres * sizeof(double)) !=
+      0) {
+    error("Failed to allocate memory for the dark matter images.");
+    return;
+  }
+  if (swift_memalign("gas_images", (void **)&image_data->gas_images[tpid],
+                     SWIFT_STRUCT_ALIGNMENT,
+                     image_data->xres * image_data->yres * sizeof(double)) !=
+      0) {
+    error("Failed to allocate memory for the gas images.");
+    return;
+  }
+  if (swift_memalign("stars_images", (void **)&image_data->stars_images[tpid],
+                     SWIFT_STRUCT_ALIGNMENT,
+                     image_data->xres * image_data->yres * sizeof(double)) !=
+      0) {
+    error("Failed to allocate memory for the star images.");
+    return;
+  }
+  if (swift_memalign(
+          "gas_temp_images", (void **)&image_data->gas_temp_images[tpid],
+          SWIFT_STRUCT_ALIGNMENT,
+          image_data->xres * image_data->yres * sizeof(double)) != 0) {
+    error("Failed to allocate memory for the gas temperature images.");
+    return;
+  }
+
+  /* Zero the images. */
+  bzero(image_data->dm_images[tpid],
+        image_data->xres * image_data->yres * sizeof(double));
+  bzero(image_data->gas_images[tpid],
+        image_data->xres * image_data->yres * sizeof(double));
+  bzero(image_data->stars_images[tpid],
+        image_data->xres * image_data->yres * sizeof(double));
+  bzero(image_data->gas_temp_images[tpid],
+        image_data->xres * image_data->yres * sizeof(double));
+}
+
+/**
+ * @brief Write images to HDF5 format.
+ *
+ * @param e The engine data structure.
+ */
+void imaging_write_images_hdf5(double *dm_image, double *gas_image,
+                               double *stars_image, double *gas_temp_image,
+                               int xres, int yres, const char *output_dir,
+                               const char *base_name, int frame_number) {
+  /* Create the output filename. */
+  char filename[256];
+  snprintf(filename, sizeof(filename), "%s/%s_%d.hdf5", output_dir,
+           frame_number);
+
+  /* Open the HDF5 file for writing. */
+  hid_t file_id = H5Fcreate(filename, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+  if (file_id < 0) {
+    error("Failed to create HDF5 file %s.", filename);
+    return;
+  }
+
+  /* Create the datasets for each image. */
+  hsize_t dims[2] = {xres, yres};
+  hid_t dataspace_id = H5Screate_simple(2, dims, NULL);
+
+  hid_t dm_dataset_id =
+      H5Dcreate(file_id, "dark_matter", H5T_NATIVE_DOUBLE, dataspace_id,
+                H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+  hid_t gas_dataset_id =
+      H5Dcreate(file_id, "gas", H5T_NATIVE_DOUBLE, dataspace_id, H5P_DEFAULT,
+                H5P_DEFAULT, H5P_DEFAULT);
+  hid_t stars_dataset_id =
+      H5Dcreate(file_id, "stars", H5T_NATIVE_DOUBLE, dataspace_id, H5P_DEFAULT,
+                H5P_DEFAULT, H5P_DEFAULT);
+  hid_t gas_temp_dataset_id =
+      H5Dcreate(file_id, "gas_temperature", H5T_NATIVE_DOUBLE, dataspace_id,
+                H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+
+  /* Write the data to the datasets. */
+  if (H5Dwrite(dm_dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, dataspace_id,
+               H5P_DEFAULT, dm_image) < 0) {
+    error("Failed to write dark matter image to %s.", filename);
+  }
+  if (H5Dwrite(gas_dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, dataspace_id,
+               H5P_DEFAULT, gas_image) < 0) {
+    error("Failed to write gas image to %s.", filename);
+  }
+  if (H5Dwrite(stars_dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, dataspace_id,
+               H5P_DEFAULT, stars_image) < 0) {
+    error("Failed to write stars image to %s.", filename);
+  }
+  if (H5Dwrite(gas_temp_dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, dataspace_id,
+               H5P_DEFAULT, gas_temp_image) < 0) {
+    error("Failed to write gas temperature image to %s.", filename);
+  }
+
+  /* Close the datasets and dataspace. */
+  H5Dclose(dm_dataset_id);
+  H5Dclose(gas_dataset_id);
+  H5Dclose(stars_dataset_id);
+  H5Dclose(gas_temp_dataset_id);
+  H5Sclose(dataspace_id);
+
+  /* Close the file. */
+  H5Fclose(file_id);
+  if (e->verbose) {
+    message("Wrote images to %s", filename);
+  }
+}
+
+/**
+ * @brief Run the imaging loop all at once creating all the images at once.
+ *
+ * @param s The space structure containing the engine and cells.
+ */
+void imaging_compute_angular_images(struct space *s) {
+
+  ticks tic = getticks();
+
+  /* Unpack things we will need. */
+  struct engine *e = s->e;
+  struct image_common_data *image_data = e->image_data;
+
+  /* Allocate the image buffers for each thread. */
+  if (swift_memalign("dm_images", (void **)&image_data->dm_images,
+                     SWIFT_STRUCT_ALIGNMENT,
+                     e->threadpool.nthreads * sizeof(double *)) != 0) {
+    error("Failed to allocate memory for the dark matter images.");
+    return;
+  }
+  if (swift_memalign("gas_images", (void **)&image_data->gas_images,
+                     SWIFT_STRUCT_ALIGNMENT,
+                     e->threadpool.nthreads * sizeof(double *)) != 0) {
+    error("Failed to allocate memory for the gas images.");
+    return;
+  }
+  if (swift_memalign("stars_images", (void **)&image_data->stars_images,
+                     SWIFT_STRUCT_ALIGNMENT,
+                     e->threadpool.nthreads * sizeof(double *)) != 0) {
+    error("Failed to allocate memory for the star images.");
+    return;
+  }
+  if (swift_memalign("gas_temp_images", (void **)&image_data->gas_temp_images,
+                     SWIFT_STRUCT_ALIGNMENT,
+                     e->threadpool.nthreads * sizeof(double *)) != 0) {
+    error("Failed to allocate memory for the gas temperature images.");
+    return;
+  }
+
+  /* Now allocate the actual image buffers for each thread. */
+  threadpool_map(&e->threadpool, imaging_allocate_threadimages_mapper, NULL,
+                 e->threadpool.nthreads, 1, 1, image_data);
+
+  /* Now we can calculate the images. */
+  threadpool_map(&e->threadpool, imaging_cell_mapper, NULL, s->nr_cells, 1,
+                 threadpool_auto_chunk_size, e);
+
+  /* We now have all the thread images filled with the data. We now need to
+   * reduce them into singular images. */
+  double *dm_image = image_data->dm_images[0];
+  double *gas_image = image_data->gas_images[0];
+  double *stars_image = image_data->stars_images[0];
+  double *gas_temp_image = image_data->gas_temp_images[0];
+  for (int i = 1; i < e->threadpool.nthreads; i++) {
+    /* Add the images from each thread together. */
+    for (int j = 0; j < image_data->xres * image_data->yres; j++) {
+      dm_image[j] += image_data->dm_images[i][j];
+      gas_image[j] += image_data->gas_images[i][j];
+      stars_image[j] += image_data->stars_images[i][j];
+      gas_temp_image[j] += image_data->gas_temp_images[i][j];
+    }
+  }
+
+  /* Final thing to do is divide out the mass weighting from the gas
+   * temperature image. */
+  for (int i = 0; i < image_data->xres * image_data->yres; i++) {
+    if (gas_image[i] > 0.0) {
+      gas_temp_image[i] /= gas_image[i];
+    } else {
+      gas_temp_image[i] = 0.0;
+    }
+  }
+
+  /* Now we can write the images out into HDF5 files. */
+  imaging_write_images_hdf5(dm_image, gas_image, stars_image, gas_temp_image,
+                            image_data->xres, image_data->yres,
+                            image_data->output_dir, image_data->base_name,
+                            image_data->frame_number);
+
+  /* Increment the frame number for the next time we write images. */
+  image_data->frame_number++;
+
+  /* Free the thread images. */
+  for (int i = 0; i < e->threadpool.nthreads; i++) {
+    free(image_data->dm_images[i]);
+    free(image_data->gas_images[i]);
+    free(image_data->stars_images[i]);
+    free(image_data->gas_temp_images[i]);
+  }
+  free(image_data->dm_images);
+  free(image_data->gas_images);
+  free(image_data->stars_images);
+  free(image_data->gas_temp_images);
+  image_data->dm_images = NULL;
+  image_data->gas_images = NULL;
+  image_data->stars_images = NULL;
+  image_data->gas_temp_images = NULL;
+
+  if (e->verbose) {
+    message("Computed angular images in %.3f seconds.",
+            clocks_from_ticks(getticks() - tic), clocks_getunit());
+  }
 }
