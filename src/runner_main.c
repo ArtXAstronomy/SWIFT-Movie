@@ -536,12 +536,6 @@ void *runner_main(void *data) {
         case task_type_rt_advance_cell_time:
           runner_do_rt_advance_cell_time(r, t->ci, 1);
           break;
-        case task_type_imaging:
-          runner_do_imaging(r, t->ci, 1);
-          break;
-        case task_type_imaging_collect:
-          runner_do_imaging_collect(r, t->ci, 1);
-          break;
         default:
           error("Unknown/invalid task type (%d).", t->type);
       }

@@ -1091,7 +1091,9 @@ Imaging:
   basename:             image       # Base name of the images
   x_resolution:         512         # Image resolution in x direction 
   y_resolution:         512         # Image resolution in y direction
-  delta_time:           1.01           # Time between statistics output
-  scale_factor_first:   0.1          # (Optional) Scale-factor of the first image (Cosmology only)
-  time_first:           0.0           # (Optional) Time of the first image (not Cosmology)
+  delta_time:           1.01        # Time between statistics output
+  scale_factor_first:   0.1         # (Optional) Scale-factor of the first image (Cosmology only)
+  time_first:           0.0         # (Optional) Time of the first image (not Cosmology)
+  distance:             10          # Distance to the observer in internal units
+  
 

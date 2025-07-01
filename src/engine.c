@@ -3527,8 +3527,8 @@ void engine_init(
       parser_get_opt_param_double(params, "Statistics:time_first", 0.);
   e->delta_time_statistics =
       parser_get_param_double(params, "Statistics:delta_time");
-  e->a_first_imaging = parser_get_opt_param_double(
-      params, "Imaging:scale_factor_first", 0.1);
+  e->a_first_imaging =
+      parser_get_opt_param_double(params, "Imaging:scale_factor_first", 0.1);
   e->time_first_imaging =
       parser_get_opt_param_double(params, "Imaging:time_first", 0.0);
   e->delta_time_imaging =
@@ -3996,7 +3996,7 @@ void engine_clean(struct engine *e, const int fof, const int restart) {
 
   /* If we are doing imaging clean it up. */
   if (e->policy & engine_policy_imaging) {
-    imaging_clean(e->image_data);
+    imaging_clean(e->image_data, e->nr_threads);
   }
 
   /* If the run was restarted, we should also free the memory allocated

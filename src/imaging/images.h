@@ -61,8 +61,11 @@ struct image_common_data {
   /*! Angular FOV in radians */
   double fov_angle[2];
 
-  /*! Camera distance from the centre of the image */
-  double camera_distance;
+  /*! How many frames are we doing in the rotation? */
+  int nr_rotation_frames;
+
+  /*! The camera position in spherical coordinates */
+  double sphere_camera_position[3];
 };
 
 /**
@@ -111,11 +114,11 @@ struct image_data {
 
 void imaging_init(struct image_common_data *image_data,
                   struct swift_params *parameter_file, const int verbose,
-                  const double dim[3], const int nodeID);
+                  const double dim[3], const int nodeID, const int nr_threads);
 void imaging_write_images(struct engine *e);
 int imaging_cell_overlaps_fov(const struct image_common_data *image_data,
                               const struct cell *c);
-void imaging_clean(struct image_common_data *image_data);
+void imaging_clean(struct image_common_data *image_data, const int nr_threads);
 void imaging_compute_angular_images(struct space *s);
 
 #endif /* SWIFT_IMAGES_H */
