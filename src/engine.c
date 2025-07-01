@@ -2557,6 +2557,35 @@ void engine_init_particles(struct engine *e, int flag_entropy_ICs,
 }
 
 /**
+ * @brief Write the GUI data to a file.
+ *
+ * Appends one formatted line of data to "gui_data.txt".
+ * Returns 0 on success, -1 on error.
+ */
+int engine_write_gui_data(const struct engine *e) {
+
+  /* Compute the percentage of the total simulation time so far */
+  double a_start = e->cosmology->a_begin;
+  double a_end = e->cosmology->a_end;
+  double current = e->cosmology->a;
+  double percentage = (current - a_start) / (a_end - a_start) * 100.0;
+
+  FILE *f = fopen("gui_data.txt", "a");
+  if (!f) {
+    perror("fopen gui_data.txt");
+    return -1;
+  }
+
+  fprintf(f, "  %6d %12.7f %12.7f %12ld %12ld %12ld %12ld %21.3f %12.7f\n",
+          e->step, e->cosmology->a, e->cosmology->z, e->s->nr_parts,
+          e->s->nr_gparts, e->s->nr_sparts, e->s->nr_bparts, e->wallclock_time,
+          percentage);
+
+  fclose(f);
+  return 0;
+}
+
+/**
  * @brief Let the #engine loose to compute the forces.
  *
  * @param e The #engine.
@@ -2629,6 +2658,9 @@ int engine_step(struct engine *e) {
       message("Writing step info to files took %.3f %s",
               clocks_from_ticks(getticks() - tic_files), clocks_getunit());
   }
+
+  /* Write out the information we need for plots */
+  engine_write_gui_data(e);
 
   /* When restarting, we may have had some i/o to do on the step
    * where we decided to stop. We have to do this now.
