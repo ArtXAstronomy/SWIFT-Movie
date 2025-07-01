@@ -43,44 +43,51 @@
  *
  * This replaces both your old alloc‐mapper and zero‐mapper.
  */
-void imaging_allocate_threadimages_mapper(void *map_data, int num_elements,
-                                          void *extra_data) {
+void imaging_allocate_threadimages(struct engine *e) {
 
   /* Unpack useful data. */
-  short int tpid = threadpool_gettid();
-  struct image_common_data *image_data = (struct image_common_data *)extra_data;
+  struct image_common_data *image_data = e->image_data;
   size_t npix = (size_t)image_data->xres * image_data->yres;
   size_t nbytes = npix * sizeof(double);
 
   /* Allocate each channel once */
-  if (image_data->dm_images[tpid] == NULL) {
-    if (swift_memalign("dm_images", (void **)&image_data->dm_images[tpid],
-                       SWIFT_STRUCT_ALIGNMENT, nbytes) != 0) {
-      error("Failed to alloc DM image for thread %d", tpid);
-      return;
+  for (int tpid = 0; tpid < e->nr_threads; tpid++) {
+
+    if (image_data->dm_images[tpid] == NULL) {
+      if (swift_memalign("dm_images", (void **)&image_data->dm_images[tpid],
+                         SWIFT_STRUCT_ALIGNMENT, nbytes) != 0) {
+        error("Failed to alloc DM image for thread %d", tpid);
+        return;
+      }
     }
-  }
-  if (image_data->gas_images[tpid] == NULL) {
-    if (swift_memalign("gas_images", (void **)&image_data->gas_images[tpid],
-                       SWIFT_STRUCT_ALIGNMENT, nbytes) != 0) {
-      error("Failed to alloc gas image for thread %d", tpid);
-      return;
+    if (image_data->gas_images[tpid] == NULL) {
+      if (swift_memalign("gas_images", (void **)&image_data->gas_images[tpid],
+                         SWIFT_STRUCT_ALIGNMENT, nbytes) != 0) {
+        error("Failed to alloc gas image for thread %d", tpid);
+        return;
+      }
     }
-  }
-  if (image_data->star_images[tpid] == NULL) {
-    if (swift_memalign("star_images", (void **)&image_data->star_images[tpid],
-                       SWIFT_STRUCT_ALIGNMENT, nbytes) != 0) {
-      error("Failed to alloc star image for thread %d", tpid);
-      return;
+    if (image_data->star_images[tpid] == NULL) {
+      if (swift_memalign("star_images", (void **)&image_data->star_images[tpid],
+                         SWIFT_STRUCT_ALIGNMENT, nbytes) != 0) {
+        error("Failed to alloc star image for thread %d", tpid);
+        return;
+      }
     }
-  }
-  if (image_data->gas_temp_images[tpid] == NULL) {
-    if (swift_memalign("gas_temp_images",
-                       (void **)&image_data->gas_temp_images[tpid],
-                       SWIFT_STRUCT_ALIGNMENT, nbytes) != 0) {
-      error("Failed to alloc gas temp image for thread %d", tpid);
-      return;
+    if (image_data->gas_temp_images[tpid] == NULL) {
+      if (swift_memalign("gas_temp_images",
+                         (void **)&image_data->gas_temp_images[tpid],
+                         SWIFT_STRUCT_ALIGNMENT, nbytes) != 0) {
+        error("Failed to alloc gas temp image for thread %d", tpid);
+        return;
+      }
     }
+
+    /* Zero the images. */
+    bzero(image_data->dm_images[tpid], nbytes);
+    bzero(image_data->gas_images[tpid], nbytes);
+    bzero(image_data->star_images[tpid], nbytes);
+    bzero(image_data->gas_temp_images[tpid], nbytes);
   }
 }
 
@@ -250,77 +257,92 @@ void imaging_clean(struct image_common_data *image_data, const int nr_threads) {
 }
 
 /**
- * @brief Project & smooth all particles in the given cells into images,
- *        using per‐particle two‐pass SPH‐kernel deposition, with a
- *        0.5-pixel fallback for tiny kernels.
+ * @brief A high-performance mapper to project & smooth particles into images
+ *
+ * Implements a single-pass SPH‐kernel deposition per particle, hoisting
+ * invariants and minimizing work inside the tight inner loops.
+ *
+ * @param map_data     (size_t) start cell index for this thread
+ * @param num_elements number of cells to process
+ * @param extra_data   (struct engine*) containing image_data & space
  */
 void imaging_cell_mapper(void *map_data, int num_elements, void *extra_data) {
+  /* Thread, engine, and space setup */
   short tpid = threadpool_gettid();
   struct engine *e = (struct engine *)extra_data;
   struct space *s = e->s;
   struct cell *cells = s->cells_top;
   struct image_common_data *id = e->image_data;
 
-  /* Unpack common data */
-  int xres = id->xres, yres = id->yres;
-  double fov_x = id->fov_angle[0], fov_y = id->fov_angle[1];
+  /* Image & FOV parameters */
+  int xres = id->xres;
+  int yres = id->yres;
+  double fov_x = id->fov_angle[0];
+  double fov_y = id->fov_angle[1];
   double R = id->sphere_camera_position[0];
   struct projected_kernel_table *kt = id->projected_kernel_table;
+  double u_max = kt->u_max;
+  double u_max_sq = u_max * u_max;
 
-  /* Angular→pixel scales */
-  double max_x = tan(fov_x * 0.5), max_y = tan(fov_y * 0.5);
+  /* Precompute angular→pixel scales */
+  double max_x = tan(fov_x * 0.5);
+  double max_y = tan(fov_y * 0.5);
   double px_per_rad_x = xres / (2.0 * max_x);
   double px_per_rad_y = yres / (2.0 * max_y);
 
-  /* Build camera basis from (R,theta,phi) */
+  /* Build camera basis (forward, right, up) from spherical coords */
   double theta = id->sphere_camera_position[1];
   double phi = id->sphere_camera_position[2];
   double cam_rel[3] = {R * sin(theta) * cos(phi), R * sin(theta) * sin(phi),
                        R * cos(theta)};
-  /* Forward = -cam_rel / |cam_rel| */
+  /* Forward = normalize(-cam_rel) */
   double F[3] = {-cam_rel[0], -cam_rel[1], -cam_rel[2]};
-  double n = sqrt(F[0] * F[0] + F[1] * F[1] + F[2] * F[2]);
-  F[0] /= n;
-  F[1] /= n;
-  F[2] /= n;
-  /* world_up adjust */
-  double world_up[3] = {0, 0, 1};
+  double norm = sqrt(F[0] * F[0] + F[1] * F[1] + F[2] * F[2]);
+  F[0] /= norm;
+  F[1] /= norm;
+  F[2] /= norm;
+  /* Adjust world‐up if nearly colinear */
+  double world_up[3] = {0.0, 0.0, 1.0};
   if (fabs(F[0] * world_up[0] + F[1] * world_up[1] + F[2] * world_up[2]) >
       0.999) {
     world_up[0] = 0;
     world_up[1] = 1;
     world_up[2] = 0;
   }
-  /* Right = cross(world_up,Forward) */
+  /* Right = normalize(cross(world_up, forward)) */
   double Rvec[3] = {world_up[1] * F[2] - world_up[2] * F[1],
                     world_up[2] * F[0] - world_up[0] * F[2],
                     world_up[0] * F[1] - world_up[1] * F[0]};
-  n = sqrt(Rvec[0] * Rvec[0] + Rvec[1] * Rvec[1] + Rvec[2] * Rvec[2]);
-  Rvec[0] /= n;
-  Rvec[1] /= n;
-  Rvec[2] /= n;
-  /* Up = cross(Forward,Right) */
+  norm = sqrt(Rvec[0] * Rvec[0] + Rvec[1] * Rvec[1] + Rvec[2] * Rvec[2]);
+  Rvec[0] /= norm;
+  Rvec[1] /= norm;
+  Rvec[2] /= norm;
+  /* Up = cross(forward, right) */
   double Uvec[3] = {F[1] * Rvec[2] - F[2] * Rvec[1],
                     F[2] * Rvec[0] - F[0] * Rvec[2],
                     F[0] * Rvec[1] - F[1] * Rvec[0]};
 
-  /* Thread‐local buffers */
+  /* Thread‐local image pointers */
   double *dm_img = id->dm_images[tpid];
   double *gas_img = id->gas_images[tpid];
   double *star_img = id->star_images[tpid];
   double *gtmp_img = id->gas_temp_images[tpid];
 
-  /* Process each assigned cell */
+  /* Base cell index for this chunk */
+  size_t base = (size_t)map_data;
+
+  /* Main loop over cells assigned to this thread */
   for (int idx = 0; idx < num_elements; idx++) {
-    int cid = (size_t)map_data + idx;
+    int cid = (int)(base + idx);
+    if (cid < 0 || cid >= s->nr_cells) continue;
     struct cell *c = &cells[cid];
 
-    /* --- Dark Matter --- */
+    /* === Dark Matter === */
     for (int j = 0; j < c->grav.count; j++) {
       struct gpart *gp = &c->grav.parts[j];
       if (gp->type != swift_type_dark_matter) continue;
 
-      /* Project into pixel‐space */
+      /* World → camera → angular → pixel */
       double P[3] = {gp->x[0] - s->dim[0] * 0.5, gp->x[1] - s->dim[1] * 0.5,
                      gp->x[2] - s->dim[2] * 0.5};
       double V[3] = {P[0] - cam_rel[0], P[1] - cam_rel[1], P[2] - cam_rel[2]};
@@ -328,15 +350,14 @@ void imaging_cell_mapper(void *map_data, int num_elements, void *extra_data) {
       double y_cam = V[0] * Uvec[0] + V[1] * Uvec[1] + V[2] * Uvec[2];
       double z_cam = V[0] * F[0] + V[1] * F[1] + V[2] * F[2];
       if (z_cam <= 1e-6) continue;
-
-      /* floating‐point pixel center */
       double fx = (x_cam / z_cam / max_x * 0.5 + 0.5) * xres;
       double fy = (y_cam / z_cam / max_y * 0.5 + 0.5) * yres;
 
-      /* smoothing length in pixels */
+      /* Smoothing length in pixels & inv */
       double h_pix = (gp->epsilon / R) * px_per_rad_x;
+      double inv_hpix = 1.0 / h_pix;
 
-      /* tiny‐kernel fallback */
+      /* Tiny‐kernel fallback */
       if (h_pix < 0.5) {
         int ix = (int)floor(fx + 0.5), iy = (int)floor(fy + 0.5);
         if (ix >= 0 && ix < xres && iy >= 0 && iy < yres)
@@ -344,42 +365,31 @@ void imaging_cell_mapper(void *map_data, int num_elements, void *extra_data) {
         continue;
       }
 
-      int delta = (int)ceil(kt->u_max * h_pix);
-      /* 1st pass: sum all weights */
-      double wsum = 0;
-      for (int di = -delta; di <= delta; di++) {
-        int ix = (int)floor(fx) + di;
-        if (ix < 0 || ix >= xres) continue;
-        double rx = fabs(fx - (ix + 0.5)) / h_pix;
-        for (int dj = -delta; dj <= delta; dj++) {
-          int iy = (int)floor(fy) + dj;
-          if (iy < 0 || iy >= yres) continue;
-          double ry = fabs(fy - (iy + 0.5)) / h_pix;
-          double u = sqrt(rx * rx + ry * ry);
-          if (u >= kt->u_max) continue;
-          wsum += projected_kernel_eval(kt, u);
-        }
-      }
-      if (wsum <= 0) continue;
+      /* Determine stencil radius */
+      int fx_i = (int)floor(fx);
+      int fy_i = (int)floor(fy);
+      int delta = (int)ceil(u_max * h_pix);
 
-      /* 2nd pass: deposit normalized mass */
-      for (int di = -delta; di <= delta; di++) {
-        int ix = (int)floor(fx) + di;
-        if (ix < 0 || ix >= xres) continue;
-        double rx = fabs(fx - (ix + 0.5)) / h_pix;
-        for (int dj = -delta; dj <= delta; dj++) {
-          int iy = (int)floor(fy) + dj;
-          if (iy < 0 || iy >= yres) continue;
-          double ry = fabs(fy - (iy + 0.5)) / h_pix;
-          double u = sqrt(rx * rx + ry * ry);
-          if (u >= kt->u_max) continue;
-          double w = projected_kernel_eval(kt, u) / wsum;
-          dm_img[iy * xres + ix] += gp->mass * w;
+      /* One‐pass deposition */
+      for (int dj = -delta; dj <= delta; dj++) {
+        int iy = fy_i + dj;
+        if (iy < 0 || iy >= yres) continue;
+        int row = iy * xres;
+        double ry2 = pow(fabs(fy - (iy + 0.5)) * inv_hpix, 2);
+
+        for (int di = -delta; di <= delta; di++) {
+          int ix = fx_i + di;
+          if (ix < 0 || ix >= xres) continue;
+          double rx2 = pow(fabs(fx - (ix + 0.5)) * inv_hpix, 2);
+          double u2 = rx2 + ry2;
+          if (u2 >= u_max_sq) continue;
+          double w = projected_kernel_eval(kt, sqrt(u2));
+          dm_img[row + ix] += gp->mass * w;
         }
       }
     }
 
-    /* --- Gas --- */
+    /* === Gas === */
     for (int j = 0; j < c->hydro.count; j++) {
       struct part *p = &c->hydro.parts[j];
 
@@ -390,11 +400,11 @@ void imaging_cell_mapper(void *map_data, int num_elements, void *extra_data) {
       double y_cam = V[0] * Uvec[0] + V[1] * Uvec[1] + V[2] * Uvec[2];
       double z_cam = V[0] * F[0] + V[1] * F[1] + V[2] * F[2];
       if (z_cam <= 1e-6) continue;
-
       double fx = (x_cam / z_cam / max_x * 0.5 + 0.5) * xres;
       double fy = (y_cam / z_cam / max_y * 0.5 + 0.5) * yres;
 
       double h_pix = (p->h / R) * px_per_rad_x;
+      double inv_hpix = 1.0 / h_pix;
       if (h_pix < 0.5) {
         int ix = (int)floor(fx + 0.5), iy = (int)floor(fy + 0.5);
         if (ix >= 0 && ix < xres && iy >= 0 && iy < yres) {
@@ -405,42 +415,31 @@ void imaging_cell_mapper(void *map_data, int num_elements, void *extra_data) {
         continue;
       }
 
-      int delta = (int)ceil(kt->u_max * h_pix);
-      double wsum = 0;
-      for (int di = -delta; di <= delta; di++) {
-        int ix = (int)floor(fx) + di;
-        if (ix < 0 || ix >= xres) continue;
-        double rx = fabs(fx - (ix + 0.5)) / h_pix;
-        for (int dj = -delta; dj <= delta; dj++) {
-          int iy = (int)floor(fy) + dj;
-          if (iy < 0 || iy >= yres) continue;
-          double ry = fabs(fy - (iy + 0.5)) / h_pix;
-          double u = sqrt(rx * rx + ry * ry);
-          if (u >= kt->u_max) continue;
-          wsum += projected_kernel_eval(kt, u);
-        }
-      }
-      if (wsum <= 0) continue;
+      int fx_i = (int)floor(fx);
+      int fy_i = (int)floor(fy);
+      int delta = (int)ceil(u_max * h_pix);
 
-      for (int di = -delta; di <= delta; di++) {
-        int ix = (int)floor(fx) + di;
-        if (ix < 0 || ix >= xres) continue;
-        double rx = fabs(fx - (ix + 0.5)) / h_pix;
-        for (int dj = -delta; dj <= delta; dj++) {
-          int iy = (int)floor(fy) + dj;
-          if (iy < 0 || iy >= yres) continue;
-          double ry = fabs(fy - (iy + 0.5)) / h_pix;
-          double u = sqrt(rx * rx + ry * ry);
-          if (u >= kt->u_max) continue;
-          double w = projected_kernel_eval(kt, u) / wsum;
-          int pix = iy * xres + ix;
+      for (int dj = -delta; dj <= delta; dj++) {
+        int iy = fy_i + dj;
+        if (iy < 0 || iy >= yres) continue;
+        int row = iy * xres;
+        double ry2 = pow(fabs(fy - (iy + 0.5)) * inv_hpix, 2);
+
+        for (int di = -delta; di <= delta; di++) {
+          int ix = fx_i + di;
+          if (ix < 0 || ix >= xres) continue;
+          double rx2 = pow(fabs(fx - (ix + 0.5)) * inv_hpix, 2);
+          double u2 = rx2 + ry2;
+          if (u2 >= u_max_sq) continue;
+          double w = projected_kernel_eval(kt, sqrt(u2));
+          int pix = row + ix;
           gas_img[pix] += p->mass * w;
           gtmp_img[pix] += p->mass * p->cooling_data.subgrid_temp * w;
         }
       }
     }
 
-    /* --- Stars --- */
+    /* === Stars === */
     for (int j = 0; j < c->stars.count; j++) {
       struct spart *sp = &c->stars.parts[j];
 
@@ -451,11 +450,11 @@ void imaging_cell_mapper(void *map_data, int num_elements, void *extra_data) {
       double y_cam = V[0] * Uvec[0] + V[1] * Uvec[1] + V[2] * Uvec[2];
       double z_cam = V[0] * F[0] + V[1] * F[1] + V[2] * F[2];
       if (z_cam <= 1e-6) continue;
-
       double fx = (x_cam / z_cam / max_x * 0.5 + 0.5) * xres;
       double fy = (y_cam / z_cam / max_y * 0.5 + 0.5) * yres;
 
       double h_pix = (sp->h / R) * px_per_rad_x;
+      double inv_hpix = 1.0 / h_pix;
       if (h_pix < 0.5) {
         int ix = (int)floor(fx + 0.5), iy = (int)floor(fy + 0.5);
         if (ix >= 0 && ix < xres && iy >= 0 && iy < yres)
@@ -463,39 +462,27 @@ void imaging_cell_mapper(void *map_data, int num_elements, void *extra_data) {
         continue;
       }
 
-      int delta = (int)ceil(kt->u_max * h_pix);
-      double wsum = 0;
-      for (int di = -delta; di <= delta; di++) {
-        int ix = (int)floor(fx) + di;
-        if (ix < 0 || ix >= xres) continue;
-        double rx = fabs(fx - (ix + 0.5)) / h_pix;
-        for (int dj = -delta; dj <= delta; dj++) {
-          int iy = (int)floor(fy) + dj;
-          if (iy < 0 || iy >= yres) continue;
-          double ry = fabs(fy - (iy + 0.5)) / h_pix;
-          double u = sqrt(rx * rx + ry * ry);
-          if (u >= kt->u_max) continue;
-          wsum += projected_kernel_eval(kt, u);
-        }
-      }
-      if (wsum <= 0) continue;
+      int fx_i = (int)floor(fx);
+      int fy_i = (int)floor(fy);
+      int delta = (int)ceil(u_max * h_pix);
 
-      for (int di = -delta; di <= delta; di++) {
-        int ix = (int)floor(fx) + di;
-        if (ix < 0 || ix >= xres) continue;
-        double rx = fabs(fx - (ix + 0.5)) / h_pix;
-        for (int dj = -delta; dj <= delta; dj++) {
-          int iy = (int)floor(fy) + dj;
-          if (iy < 0 || iy >= yres) continue;
-          double ry = fabs(fy - (iy + 0.5)) / h_pix;
-          double u = sqrt(rx * rx + ry * ry);
-          if (u >= kt->u_max) continue;
-          double w = projected_kernel_eval(kt, u) / wsum;
-          star_img[iy * xres + ix] += sp->mass * w;
+      for (int dj = -delta; dj <= delta; dj++) {
+        int iy = fy_i + dj;
+        if (iy < 0 || iy >= yres) continue;
+        int row = iy * xres;
+        double ry2 = pow(fabs(fy - (iy + 0.5)) * inv_hpix, 2);
+
+        for (int di = -delta; di <= delta; di++) {
+          int ix = fx_i + di;
+          if (ix < 0 || ix >= xres) continue;
+          double rx2 = pow(fabs(fx - (ix + 0.5)) * inv_hpix, 2);
+          double u2 = rx2 + ry2;
+          if (u2 >= u_max_sq) continue;
+          double w = projected_kernel_eval(kt, sqrt(u2));
+          star_img[row + ix] += sp->mass * w;
         }
       }
     }
-
   } /* end cells */
 }
 
@@ -567,18 +554,7 @@ void imaging_compute_angular_images(struct space *s) {
     id->sphere_camera_position[2] = phi0 + (2.0 * M_PI * f) / (double)nf;
 
     /* Allocate & zero each thread’s buffers */
-    threadpool_map(&e->threadpool, imaging_allocate_threadimages_mapper, NULL,
-                   e->nr_threads, 1, 1, id);
-
-    /* Explicitly zero the thread-0 buffers before each frame */
-    for (int t = 0; t < e->nr_threads; t++) {
-      for (size_t i = 0; i < npix; i++) {
-        id->dm_images[t][i] = 0.0;
-        id->gas_images[t][i] = 0.0;
-        id->star_images[t][i] = 0.0;
-        id->gas_temp_images[t][i] = 0.0;
-      }
-    }
+    imaging_allocate_threadimages(e);
 
     /* Project all cells */
     threadpool_map(&e->threadpool, imaging_cell_mapper, NULL, s->nr_cells, 1,
