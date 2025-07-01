@@ -194,6 +194,14 @@ void imaging_init(struct image_common_data *image_data,
             image_data->sphere_camera_position[2]);
     message("Number of rotation frames: %d", image_data->nr_rotation_frames);
   }
+
+  /* If gui_data.txt already exists in simulation directory, remove it. */
+  if (nodeID == 0) {
+    FILE *f = fopen("gui_data.txt", "w");
+    fprintf(f, "  %6s %12s %12s %12s %12s %12s %12s %21s %12s\n", "step", "a",
+            "z", "Nparts", "Ngparts", "Nsparts", "Nbparts", "Wallclock", "%");
+    fclose(f);
+  }
 }
 
 void imaging_write_images(struct engine *e) {
