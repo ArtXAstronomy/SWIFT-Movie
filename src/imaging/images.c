@@ -125,10 +125,29 @@ void imaging_init(struct image_common_data *image_data,
   /* Create the staging directory for the images too if it does not exist. */
   char staging_dir[256];
   snprintf(staging_dir, sizeof(staging_dir), "%s_tmp", image_data->output_dir);
+  if (nodeID == 0) {
+    safe_checkdir(staging_dir, /*create=*/1);
+  }
 
-  /* Angular field of view in radians. */
-  image_data->fov_angle[0] = M_PI / 3.0;  // 60 degrees
-  image_data->fov_angle[1] = M_PI / 3.0;  // 60 degrees
+  /* Angular field of view in radians, here we need to account for whether the
+   * image is square or not. */
+  const double fixed_fov = M_PI / 3.0; /* 60° */
+  double hfov, vfov;
+  if (image_data->xres > image_data->yres) {
+    hfov = fixed_fov;
+    vfov = 2.0 * atan(tan(fixed_fov * 0.5) *
+                      ((double)image_data->yres / image_data->xres));
+  } else if (image_data->yres > image_data->xres) {
+    vfov = fixed_fov;
+    hfov = 2.0 * atan(tan(fixed_fov * 0.5) *
+                      ((double)image_data->xres / image_data->yres));
+  } else {
+    /* square pixels: both axes = 60° */
+    hfov = vfov = fixed_fov;
+  }
+
+  image_data->fov_angle[0] = hfov;
+  image_data->fov_angle[1] = vfov;
 
   /* Get the camera position in spherical coordinates (R, theta, phi). */
   image_data->sphere_camera_position[0] =
@@ -362,7 +381,7 @@ void imaging_cell_mapper(void *map_data, int num_elements, void *extra_data) {
       double fy = (y_cam / z_cam / max_y * 0.5 + 0.5) * yres;
 
       /* Smoothing length in pixels & inv */
-      double h_pix = (gp->epsilon / R) * px_per_rad_x;
+      double h_pix = (gp->epsilon * 4 / R) * px_per_rad_x;
       double inv_hpix = 1.0 / h_pix;
 
       /* Tiny‐kernel fallback */
