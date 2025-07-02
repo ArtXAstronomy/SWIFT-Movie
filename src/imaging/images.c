@@ -27,10 +27,6 @@
 #include <stddef.h>
 #include <stdlib.h>
 
-/* STB image writer for writing PNGs. */
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image_write.h"
-
 /* Local includes. */
 #include "colormaps.h"
 #include "lightcone/projected_kernel.h"
@@ -125,6 +121,10 @@ void imaging_init(struct image_common_data *image_data,
   if (nodeID == 0) {
     safe_checkdir(image_data->output_dir, /*create=*/1);
   }
+
+  /* Create the staging directory for the images too if it does not exist. */
+  char staging_dir[256];
+  snprintf(staging_dir, sizeof(staging_dir), "%s_tmp", image_data->output_dir);
 
   /* Angular field of view in radians. */
   image_data->fov_angle[0] = M_PI / 3.0;  // 60 degrees
@@ -513,10 +513,13 @@ void imaging_compute_angular_images(struct space *s) {
   /* 3D dataset dims: [frames, X, Y] */
   hsize_t dims3[3] = {(hsize_t)nf, (hsize_t)xres, (hsize_t)yres};
 
-  /* Build output filename */
+  /* Build temporary & final names */
   char filename[256];
-  snprintf(filename, sizeof(filename), "%s/%s_%d.hdf5", id->output_dir,
+  char final_filename[256];
+  snprintf(filename, sizeof(filename), "%s_tmp/%s_%d.hdf5", id->output_dir,
            id->base_name, id->frame_number);
+  snprintf(final_filename, sizeof(final_filename), "%s/%s_%d.hdf5",
+           id->output_dir, id->base_name, id->frame_number);
 
   /* 1) Create the HDF5 file */
   hid_t file_id = H5Fcreate(filename, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
@@ -631,6 +634,15 @@ void imaging_compute_angular_images(struct space *s) {
   H5Dclose(d_str);
   H5Dclose(d_gtmp);
   H5Fclose(file_id);
+
+  /* Move the temporary file to the final name */
+  if (rename(filename, final_filename) != 0) {
+    error("Failed to rename %s to %s.", filename, final_filename);
+  } else {
+    if (e->verbose) {
+      message("Wrote %d rotation frames to %s.", nf, final_filename);
+    }
+  }
 
   /* Advance frame counter */
   id->frame_number++;
