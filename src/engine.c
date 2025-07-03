@@ -2556,6 +2556,38 @@ void engine_init_particles(struct engine *e, int flag_entropy_ICs,
   if (e->verbose) message("took %.3f %s.", e->wallclock_time, clocks_getunit());
 }
 
+void engine_compute_gui_data(const struct engine *e, double *sfrd,
+                             double *stellar_mass) {
+
+  /* Get the data we need */
+  struct space *s = e->s;
+  struct spart *sparts = s->sparts;
+
+  /* Calculate the lower limit for the scale factor at -100 Myr */
+  double t_now =
+      cosmology_get_time_since_big_bang(e->cosmology, e->cosmology->a);
+  double t_then = t_now - 0.0001;
+  double t_begin =
+      cosmology_get_time_since_big_bang(e->cosmology, e->cosmology->a_begin);
+
+  /* Nothing to do if "then" is before the start of the simulation */
+  if (t_then < t_begin) {
+    return;
+  }
+
+  /* Loop over stars and compute the SFRD and stellar mass */
+  for (int i = 0; i < s->nr_sparts; i++) {
+    /* Acumulate the mass */
+    *stellar_mass += sparts[i].mass;
+
+    /* If the star is younger than 100 Myr, add to the SFRD */
+    if (sparts[i].birth_time >= t_then) {
+      /* Convert to SFRD (Msun/yr) */
+      *sfrd += sparts[i].mass / 0.1 / (s->dim[0] * s->dim[1] * s->dim[2]);
+    }
+  }
+}
+
 /**
  * @brief Write the GUI data to a file.
  *
@@ -2576,10 +2608,32 @@ int engine_write_gui_data(const struct engine *e) {
     return -1;
   }
 
-  fprintf(f, "  %6d %12.7f %12.7f %12ld %12ld %12ld %12ld %21.3f %12.7f\n",
-          e->step, e->cosmology->a, e->cosmology->z, e->s->nr_parts,
-          e->s->nr_gparts, e->s->nr_sparts, e->s->nr_bparts, e->wallclock_time,
-          percentage);
+  /* Set the data */
+  double sfrd = 0.0;
+  double stellar_mass = 0.0;
+
+  /* If we have enough stars call the mapper */
+  if (e->s->nr_sparts > 0) {
+    engine_compute_gui_data(e, &sfrd, &stellar_mass);
+  } else {
+    /* If no stars, set to zero */
+    stellar_mass = 0.0;
+    sfrd = 0.0;
+  }
+
+  fprintf(
+      f,
+      "  %6d %12.7f %12.7f %12ld %12ld %12ld %12ld %12lld %12lld "
+      "%12lld %12lld %21.3f %12.7f %12.7f %12.7f %12.7f\n",
+      e->step, e->cosmology->a, e->cosmology->z,
+      e->s->nr_parts - e->s->nr_inhibited_parts - e->s->nr_extra_parts,
+      e->s->nr_gparts - e->s->nr_inhibited_gparts - e->s->nr_extra_gparts,
+      e->s->nr_sparts - e->s->nr_inhibited_sparts - e->s->nr_extra_sparts,
+      e->s->nr_bparts - e->s->nr_inhibited_bparts - e->s->nr_extra_bparts,
+      e->updates, e->g_updates, e->s_updates, e->b_updates, e->wallclock_time,
+      percentage,
+      cosmology_get_time_since_big_bang(e->cosmology, e->cosmology->a) * 1000,
+      stellar_mass, sfrd);
 
   fclose(f);
   return 0;
@@ -2772,7 +2826,8 @@ int engine_step(struct engine *e) {
     }
   }
 
-  /* Trigger a tree-rebuild if the fraction of active gparts is large enough */
+  /* Trigger a tree-rebuild if the fraction of active gparts is large enough
+   */
   if ((e->policy & engine_policy_self_gravity) && !e->forcerebuild &&
       e->gravity_properties->rebuild_active_fraction <= 1.0f) {
 
@@ -3280,8 +3335,8 @@ cpu_set_t *engine_entry_affinity(void) {
 #endif
 
 /**
- * @brief  Ensure the NUMA node on which we initialise (first touch) everything
- * doesn't change before engine_init allocates NUMA-local workers.
+ * @brief  Ensure the NUMA node on which we initialise (first touch)
+ * everything doesn't change before engine_init allocates NUMA-local workers.
  */
 void engine_pin(void) {
 
@@ -4092,6 +4147,12 @@ void engine_struct_dump(struct engine *e, FILE *stream) {
   restart_write_blocks(e, sizeof(struct engine), 1, stream, "engine",
                        "engine struct");
 
+  /* Dumping the imaging if  we are doing it. */
+  if (e->policy & engine_policy_imaging) {
+    restart_write_blocks(e->image_data, sizeof(struct image_common_data), 1,
+                         stream, "image_data", "imaging struct");
+  }
+
   /* And all the engine pointed data, these use their own dump functions. */
   space_struct_dump(e->s, stream);
   units_struct_dump(e->internal_units, stream);
@@ -4152,6 +4213,16 @@ void engine_struct_restore(struct engine *e, FILE *stream) {
   /* Read the engine. */
   restart_read_blocks(e, sizeof(struct engine), 1, stream, NULL,
                       "engine struct");
+
+  /* If we are doing imaging, restore the imaging data. */
+  if (e->policy & engine_policy_imaging) {
+    e->image_data =
+        (struct image_common_data *)malloc(sizeof(struct image_common_data));
+    restart_read_blocks(e->image_data, sizeof(struct image_common_data), 1,
+                        stream, NULL, "imaging struct");
+  } else {
+    e->image_data = NULL;
+  }
 
   /* Re-initializations as necessary for our struct and its members. */
   e->sched.tasks = NULL;

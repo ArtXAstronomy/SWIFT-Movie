@@ -217,8 +217,12 @@ void imaging_init(struct image_common_data *image_data,
   /* If gui_data.txt already exists in simulation directory, remove it. */
   if (nodeID == 0) {
     FILE *f = fopen("gui_data.txt", "w");
-    fprintf(f, "  %6s %12s %12s %12s %12s %12s %12s %21s %12s\n", "step", "a",
-            "z", "Nparts", "Ngparts", "Nsparts", "Nbparts", "Wallclock", "%");
+    fprintf(f,
+            "  %6s %12s %12s %12s %12s %12s %12s %12s %12s %12s %12s %21s %12s "
+            "%12s %12s %12s\n",
+            "step", "a", "z", "Nparts", "Ngparts", "Nsparts", "Nbparts",
+            "Nupdates", "Ngupdates", "Nspupdates", "Nbupdates", "Wallclock",
+            "%", "Time", "SMass", "CSFRD");
     fclose(f);
   }
 }
@@ -381,7 +385,7 @@ void imaging_cell_mapper(void *map_data, int num_elements, void *extra_data) {
       double fy = (y_cam / z_cam / max_y * 0.5 + 0.5) * yres;
 
       /* Smoothing length in pixels & inv */
-      double h_pix = (gp->epsilon * 4 / R) * px_per_rad_x;
+      double h_pix = (gp->epsilon * 1.5 / R) * px_per_rad_x;
       double inv_hpix = 1.0 / h_pix;
 
       /* Tiny‐kernel fallback */
