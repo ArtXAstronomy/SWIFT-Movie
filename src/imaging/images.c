@@ -365,13 +365,15 @@ void imaging_cell_mapper(void *map_data, int num_elements, void *extra_data) {
   /* Main loop over cells assigned to this thread */
   for (int idx = 0; idx < num_elements; idx++) {
     int cid = (int)(base + idx);
-    if (cid < 0 || cid >= s->nr_cells) continue;
+    if (cid < 0 || cid >= s->nr_cells)
+      continue;
     struct cell *c = &cells[cid];
 
     /* === Dark Matter === */
     for (int j = 0; j < c->grav.count; j++) {
       struct gpart *gp = &c->grav.parts[j];
-      if (gp->type != swift_type_dark_matter) continue;
+      if (gp->type != swift_type_dark_matter)
+        continue;
 
       /* World → camera → angular → pixel */
       double P[3] = {gp->x[0] - s->dim[0] * 0.5, gp->x[1] - s->dim[1] * 0.5,
@@ -380,7 +382,8 @@ void imaging_cell_mapper(void *map_data, int num_elements, void *extra_data) {
       double x_cam = V[0] * Rvec[0] + V[1] * Rvec[1] + V[2] * Rvec[2];
       double y_cam = V[0] * Uvec[0] + V[1] * Uvec[1] + V[2] * Uvec[2];
       double z_cam = V[0] * F[0] + V[1] * F[1] + V[2] * F[2];
-      if (z_cam <= 1e-6) continue;
+      if (z_cam <= 1e-6)
+        continue;
       double fx = (x_cam / z_cam / max_x * 0.5 + 0.5) * xres;
       double fy = (y_cam / z_cam / max_y * 0.5 + 0.5) * yres;
 
@@ -404,16 +407,19 @@ void imaging_cell_mapper(void *map_data, int num_elements, void *extra_data) {
       /* One‐pass deposition */
       for (int dj = -delta; dj <= delta; dj++) {
         int iy = fy_i + dj;
-        if (iy < 0 || iy >= yres) continue;
+        if (iy < 0 || iy >= yres)
+          continue;
         int row = iy * xres;
         double ry2 = pow(fabs(fy - (iy + 0.5)) * inv_hpix, 2);
 
         for (int di = -delta; di <= delta; di++) {
           int ix = fx_i + di;
-          if (ix < 0 || ix >= xres) continue;
+          if (ix < 0 || ix >= xres)
+            continue;
           double rx2 = pow(fabs(fx - (ix + 0.5)) * inv_hpix, 2);
           double u2 = rx2 + ry2;
-          if (u2 >= u_max_sq) continue;
+          if (u2 >= u_max_sq)
+            continue;
           double w = projected_kernel_eval(kt, sqrt(u2));
           dm_img[row + ix] += gp->mass * w;
         }
@@ -430,7 +436,8 @@ void imaging_cell_mapper(void *map_data, int num_elements, void *extra_data) {
       double x_cam = V[0] * Rvec[0] + V[1] * Rvec[1] + V[2] * Rvec[2];
       double y_cam = V[0] * Uvec[0] + V[1] * Uvec[1] + V[2] * Uvec[2];
       double z_cam = V[0] * F[0] + V[1] * F[1] + V[2] * F[2];
-      if (z_cam <= 1e-6) continue;
+      if (z_cam <= 1e-6)
+        continue;
       double fx = (x_cam / z_cam / max_x * 0.5 + 0.5) * xres;
       double fy = (y_cam / z_cam / max_y * 0.5 + 0.5) * yres;
 
@@ -452,16 +459,19 @@ void imaging_cell_mapper(void *map_data, int num_elements, void *extra_data) {
 
       for (int dj = -delta; dj <= delta; dj++) {
         int iy = fy_i + dj;
-        if (iy < 0 || iy >= yres) continue;
+        if (iy < 0 || iy >= yres)
+          continue;
         int row = iy * xres;
         double ry2 = pow(fabs(fy - (iy + 0.5)) * inv_hpix, 2);
 
         for (int di = -delta; di <= delta; di++) {
           int ix = fx_i + di;
-          if (ix < 0 || ix >= xres) continue;
+          if (ix < 0 || ix >= xres)
+            continue;
           double rx2 = pow(fabs(fx - (ix + 0.5)) * inv_hpix, 2);
           double u2 = rx2 + ry2;
-          if (u2 >= u_max_sq) continue;
+          if (u2 >= u_max_sq)
+            continue;
           double w = projected_kernel_eval(kt, sqrt(u2));
           int pix = row + ix;
           gas_img[pix] += p->mass * w;
@@ -480,7 +490,8 @@ void imaging_cell_mapper(void *map_data, int num_elements, void *extra_data) {
       double x_cam = V[0] * Rvec[0] + V[1] * Rvec[1] + V[2] * Rvec[2];
       double y_cam = V[0] * Uvec[0] + V[1] * Uvec[1] + V[2] * Uvec[2];
       double z_cam = V[0] * F[0] + V[1] * F[1] + V[2] * F[2];
-      if (z_cam <= 1e-6) continue;
+      if (z_cam <= 1e-6)
+        continue;
       double fx = (x_cam / z_cam / max_x * 0.5 + 0.5) * xres;
       double fy = (y_cam / z_cam / max_y * 0.5 + 0.5) * yres;
 
@@ -499,16 +510,19 @@ void imaging_cell_mapper(void *map_data, int num_elements, void *extra_data) {
 
       for (int dj = -delta; dj <= delta; dj++) {
         int iy = fy_i + dj;
-        if (iy < 0 || iy >= yres) continue;
+        if (iy < 0 || iy >= yres)
+          continue;
         int row = iy * xres;
         double ry2 = pow(fabs(fy - (iy + 0.5)) * inv_hpix, 2);
 
         for (int di = -delta; di <= delta; di++) {
           int ix = fx_i + di;
-          if (ix < 0 || ix >= xres) continue;
+          if (ix < 0 || ix >= xres)
+            continue;
           double rx2 = pow(fabs(fx - (ix + 0.5)) * inv_hpix, 2);
           double u2 = rx2 + ry2;
-          if (u2 >= u_max_sq) continue;
+          if (u2 >= u_max_sq)
+            continue;
           double w = projected_kernel_eval(kt, sqrt(u2));
           star_img[row + ix] += sp->mass * w;
         }
@@ -550,6 +564,36 @@ void imaging_compute_angular_images(struct space *s) {
     error("Failed to create HDF5 file %s.", filename);
     return;
   }
+
+  /* — add root‐level attributes “step” and “age” — */
+  {
+    hid_t attr_space = H5Screate(H5S_SCALAR);
+    if (attr_space >= 0) {
+      /* attribute: step */
+      hid_t attr_step = H5Acreate2(file_id, "step", H5T_NATIVE_INT, attr_space,
+                                   H5P_DEFAULT, H5P_DEFAULT);
+      if (attr_step >= 0) {
+        int step_value = e->step;
+        H5Awrite(attr_step, H5T_NATIVE_INT, &step_value);
+        H5Aclose(attr_step);
+      }
+
+      /* attribute: age (in same units as gui_data.txt:
+       * time_since_big_bang()*1000) */
+      hid_t attr_age = H5Acreate2(file_id, "age", H5T_NATIVE_DOUBLE, attr_space,
+                                  H5P_DEFAULT, H5P_DEFAULT);
+      if (attr_age >= 0) {
+        double age_value =
+            cosmology_get_time_since_big_bang(e->cosmology, e->cosmology->a) *
+            1000.0;
+        H5Awrite(attr_age, H5T_NATIVE_DOUBLE, &age_value);
+        H5Aclose(attr_age);
+      }
+
+      H5Sclose(attr_space);
+    }
+  }
+  /* ———————————————————————————————————————— */
 
   /* 2) Create a property list for chunking+compression */
   hid_t dcpl = H5Pcreate(H5P_DATASET_CREATE);
