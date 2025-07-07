@@ -2607,11 +2607,11 @@ void engine_compute_gui_data(const struct engine *e, double *sfrd,
   /* Calculate the lower limit for the scale factor at -100 Myr */
   double t_now =
       cosmology_get_time_since_big_bang(e->cosmology, e->cosmology->a) *
-      1e6; /* in Myrs */
+      1000; /* in Myrs */
   double t_then = t_now - 100.0;
   double t_begin =
       cosmology_get_time_since_big_bang(e->cosmology, e->cosmology->a_begin) *
-      1e6 /* in Myrs */;
+      1000 /* in Myrs */;
 
   /* Nothing to do if "then" is before the start of the simulation */
   if (t_then < t_begin) {
