@@ -492,11 +492,9 @@ void engine_io(struct engine *e) {
   /* Do we want to write an image? We check this using a flag to avoid the fact
    * ti_end_min has been updated between unskip and here. */
   if (with_imaging) {
-    if (e->imaging_this_timestep) {
-      if (e->ti_next_imaging < ti_output) {
-        ti_output = e->ti_next_imaging;
-        type = output_imaging;
-      }
+    if (e->ti_end_min > e->ti_next_imaging && e->ti_next_imaging) {
+      ti_output = e->ti_next_imaging;
+      type = output_imaging;
     }
   }
 
@@ -713,11 +711,9 @@ void engine_io(struct engine *e) {
     /* Do we want to write an image? We check this using a flag to avoid the
      * fact ti_end_min has been updated between unskip and here. */
     if (with_imaging) {
-      if (e->imaging_this_timestep) {
-        if (e->ti_next_imaging < ti_output) {
-          ti_output = e->ti_next_imaging;
-          type = output_imaging;
-        }
+      if (e->ti_end_min > e->ti_next_imaging && e->ti_next_imaging > 0) {
+        ti_output = e->ti_next_imaging;
+        type = output_imaging;
       }
     }
 
@@ -947,6 +943,15 @@ void engine_compute_next_statistics_time(struct engine *e) {
  * @param e The #engine.
  */
 void engine_compute_next_imaging_time(struct engine *e) {
+
+  /* Do output_list file case */
+  if (e->output_list_imaging) {
+    output_list_read_next_time(e->output_list_imaging, e, "images",
+                               &e->ti_next_imaging);
+
+    /* All done in the list case */
+    return;
+  }
 
   /* Nothing to do if we are not imaging */
   if (!(e->policy & engine_policy_imaging)) {
@@ -1383,6 +1388,25 @@ void engine_init_output_lists(struct engine *e, struct swift_params *params,
             exp(e->ti_next_ps * e->time_base) * e->cosmology->a_begin;
       else
         e->time_first_ps_output = e->ti_next_ps * e->time_base + e->time_begin;
+    }
+  }
+
+  /* Deal with imaging */
+  if (e->policy & engine_policy_imaging) {
+
+    e->output_list_imaging = NULL;
+    output_list_init(&e->output_list_imaging, e, "Imaging",
+                     &e->delta_time_imaging);
+
+    if (e->output_list_imaging) {
+      engine_compute_next_imaging_time(e);
+
+      if (e->policy & engine_policy_cosmology)
+        e->a_first_imaging =
+            exp(e->ti_next_imaging * e->time_base) * e->cosmology->a_begin;
+      else
+        e->time_first_imaging =
+            e->ti_next_imaging * e->time_base + e->time_begin;
     }
   }
 }

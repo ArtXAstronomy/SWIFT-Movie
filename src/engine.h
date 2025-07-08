@@ -700,11 +700,11 @@ struct engine {
   double time_first_imaging;
   double delta_time_imaging;
 
+  /* Output_List for the images */
+  struct output_list *output_list_imaging;
+
   /* Integer time of the next imaging calculation and dump */
   integertime_t ti_next_imaging;
-
-  /* Flag that we are doing imaging this timestep */
-  int imaging_this_timestep;
 };
 
 /* Function prototypes, engine.c. */

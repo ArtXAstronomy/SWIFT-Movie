@@ -232,10 +232,6 @@ void imaging_write_images(struct engine *e) {
   /* Call the imaging function to generate and write the images. */
   struct space *s = e->s;
   imaging_compute_angular_images(s);
-
-  /* Ok, we are done. Reset the flag for imaging so it can be reevaluated
-   * next timestep. */
-  e->imaging_this_timestep = 0;
 }
 
 /**
