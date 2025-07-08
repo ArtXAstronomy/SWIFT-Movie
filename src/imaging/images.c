@@ -543,6 +543,13 @@ void imaging_compute_angular_images(struct space *s) {
   const int yres = id->yres;
   const size_t npix = (size_t)xres * yres;
 
+  /* Remember the initial position of the camera in spherical coords so we can
+   * restore it after the imaging loop. */
+  double initial_sphere_camera_position[3];
+  initial_sphere_camera_position[0] = id->sphere_camera_position[0];
+  initial_sphere_camera_position[1] = id->sphere_camera_position[1];
+  initial_sphere_camera_position[2] = id->sphere_camera_position[2];
+
   /* 3D dataset dims: [frames, X, Y] */
   hsize_t dims3[3] = {(hsize_t)nf, (hsize_t)xres, (hsize_t)yres};
 
@@ -714,4 +721,9 @@ void imaging_compute_angular_images(struct space *s) {
     message("Computed %d rotation frames in %.3f %s.", nf,
             clocks_from_ticks(getticks() - tic), clocks_getunit());
   }
+
+  /* Restore the initial camera position */
+  id->sphere_camera_position[0] = initial_sphere_camera_position[0];
+  id->sphere_camera_position[1] = initial_sphere_camera_position[1];
+  id->sphere_camera_position[2] = initial_sphere_camera_position[2];
 }
